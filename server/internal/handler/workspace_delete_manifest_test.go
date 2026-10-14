@@ -144,6 +144,12 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
+
+	// Task-status notifications (MUL-11): removed with the workspace's issues.
+	"task_status_notification":              workspaceDelete,
+	"task_status_notification_event":        workspaceDelete,
+	"task_status_notification_message":      workspaceDelete,
+	"task_status_notification_subscription": workspaceDelete,
 }
 
 func TestWorkspaceDeletionManifestCoversPublicSchema(t *testing.T) {

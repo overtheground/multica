@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS task_status_notification_message_idx ON task_status_notification_message (installation_id, channel_message_id);

@@ -369,6 +369,12 @@ type Handler struct {
 	// The process owner starts and joins it; the synchronous event bus only
 	// enqueues EventChatDone work.
 	TelegramOutbound *telegram.Outbound
+	// TelegramNotifications delivers task-status notifications the agent
+	// composed into the member's private chat; TaskStatusNotifier decides
+	// which results become such notifications. Both nil unless Telegram is
+	// configured — it is the only delivery surface (MUL-11).
+	TelegramNotifications *telegram.NotificationDelivery
+	TaskStatusNotifier    *service.TaskStatusNotifier
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the

@@ -1999,7 +1999,7 @@ type ChatLastMessage struct {
 // buildChatLastMessage assembles the preview from list-row columns; returns nil
 // when there is no last message (the LEFT JOIN produced a NULL timestamp).
 func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text, kind string) *ChatLastMessage {
-	if !at.Valid || kind == protocol.ChatMessageKindOnboardingKickoff {
+	if !at.Valid || isHiddenChatMessageKind(kind) {
 		return nil
 	}
 	return &ChatLastMessage{
@@ -2076,12 +2076,19 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 func visibleChatMessages(messages []db.ChatMessage) []db.ChatMessage {
 	visible := make([]db.ChatMessage, 0, len(messages))
 	for _, message := range messages {
-		if message.MessageKind == protocol.ChatMessageKindOnboardingKickoff {
+		if isHiddenChatMessageKind(message.MessageKind) {
 			continue
 		}
 		visible = append(visible, message)
 	}
 	return visible
+}
+
+// isHiddenChatMessageKind reports the server-authored turn inputs that reach
+// the agent runtime but are never part of the member-visible conversation:
+// the onboarding kickoff and a task-status notification's event facts.
+func isHiddenChatMessageKind(kind string) bool {
+	return kind == protocol.ChatMessageKindOnboardingKickoff || kind == protocol.ChatMessageKindTaskStatusEvent
 }
 
 func decodeChatQuickActions(raw []byte) []protocol.ChatQuickAction {

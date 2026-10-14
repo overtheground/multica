@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS task_status_notification_compose_task_idx;

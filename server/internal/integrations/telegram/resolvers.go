@@ -36,11 +36,14 @@ func NewTelegramResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
 		Dedup:        &deduper{q: q},
-		Session: &sessionBinder{session: engine.NewChatSession(q, tx, TypeTelegram, engine.SessionTitles{
-			Group:    "Telegram group",
-			Direct:   "Telegram direct message",
-			Fallback: "Telegram chat",
-		})},
+		Session: &sessionBinder{
+			session: engine.NewChatSession(q, tx, TypeTelegram, engine.SessionTitles{
+				Group:    "Telegram group",
+				Direct:   "Telegram direct message",
+				Fallback: "Telegram chat",
+			}),
+			notifications: &notificationContext{q: q, logger: slog.Default()},
+		},
 		Media:      media,
 		Audit:      &auditor{q: q},
 		Replier:    replier,
@@ -205,7 +208,12 @@ type chatSession interface {
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
 
-type sessionBinder struct{ session chatSession }
+type sessionBinder struct {
+	session chatSession
+	// notifications resolves what a private message answers when the agent
+	// spoke first (notification_context.go). Nil leaves bodies untouched.
+	notifications *notificationContext
+}
 
 func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
 	bindingKey, config, _ := telegramSessionRouting(p.Message)
@@ -229,7 +237,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
 		},
 		Initiator: p.Sender,
-		Body:      p.Message.Text, CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		Body:      r.notifications.enrich(ctx, p.Installation.ID, pgtype.UUID{}, p.Sender, p.Message), CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
 		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
 		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit: p.BeforeCommit,
@@ -254,7 +262,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		SessionID:           p.SessionID,
 		Sender:              p.Sender,
 		InstallationID:      p.InstallationID,
-		Body:                p.Message.Text,
+		Body:                r.notifications.enrich(ctx, p.InstallationID, p.SessionID, p.Sender, p.Message),
 		CommandText:         commandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            replyThread,

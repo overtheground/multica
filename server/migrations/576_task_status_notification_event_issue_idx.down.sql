@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS task_status_notification_event_issue_idx;

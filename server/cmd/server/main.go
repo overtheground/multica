@@ -778,6 +778,10 @@ func main() {
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
 	}
+	if h.TaskStatusNotifier != nil && h.TelegramNotifications != nil {
+		go h.TaskStatusNotifier.Run(sweepCtx, 5*time.Second)
+		go h.TelegramNotifications.Run(sweepCtx, 2*time.Second)
+	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
 	h.PRRefresh.Start(sweepCtx)

@@ -1505,6 +1505,79 @@ type TaskMessage struct {
 	CallID          pgtype.Text        `json:"call_id"`
 }
 
+type TaskStatusNotification struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SubscriptionID pgtype.UUID        `json:"subscription_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	EventID        pgtype.UUID        `json:"event_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	IssueStatus    string             `json:"issue_status"`
+	DedupKey       string             `json:"dedup_key"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	BindingID      pgtype.UUID        `json:"binding_id"`
+	RouteRevision  pgtype.Int8        `json:"route_revision"`
+	ChannelChatID  pgtype.Text        `json:"channel_chat_id"`
+	InputMessageID pgtype.UUID        `json:"input_message_id"`
+	ComposeTaskID  pgtype.UUID        `json:"compose_task_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	State          string             `json:"state"`
+	AttemptCount   int32              `json:"attempt_count"`
+	ChunksSent     int32              `json:"chunks_sent"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+	SentAt         pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TaskStatusNotificationEvent struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Source        string             `json:"source"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	TaskStatus    pgtype.Text        `json:"task_status"`
+	IssueStatus   string             `json:"issue_status"`
+	IssueCategory string             `json:"issue_category"`
+	IssueRevision int64              `json:"issue_revision"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	AvailableAt   pgtype.Timestamptz `json:"available_at"`
+	ClaimedAt     pgtype.Timestamptz `json:"claimed_at"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+	Outcome       pgtype.Text        `json:"outcome"`
+}
+
+type TaskStatusNotificationMessage struct {
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	ChannelChatID    string             `json:"channel_chat_id"`
+	ChannelMessageID string             `json:"channel_message_id"`
+	NotificationID   pgtype.UUID        `json:"notification_id"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
+	ChunkIndex       int32              `json:"chunk_index"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type TaskStatusNotificationSubscription struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Enabled        bool               `json:"enabled"`
+	Statuses       []string           `json:"statuses"`
+	ProjectIds     []pgtype.UUID      `json:"project_ids"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskSupplement struct {
 	TaskID          pgtype.UUID        `json:"task_id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`

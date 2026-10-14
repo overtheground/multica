@@ -1213,8 +1213,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				h.DeclareChannelFileDelivery(string(telegram.TypeTelegram))
 			}
 			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping, telegramMedia))
+			// Notification turns are delivered by their own outbox, not the
+			// streaming reply path.
+			telegramOutbound.SkipNotificationTurns(queries)
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
+			h.TelegramNotifications = telegram.NewNotificationDelivery(queries, pool, box.Open, "", nil, slog.Default())
+			h.TaskStatusNotifier = &service.TaskStatusNotifier{
+				Queries: queries, Tasks: h.TaskService, AppURL: appURLFromEnv(), Logger: slog.Default(),
+			}
 
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// long-polling loop per active Telegram installation.
@@ -2462,6 +2469,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
 			})
+
+			// Task-status notifications in the member's private agent chat (MUL-11).
+			r.Get("/api/task-status-notifications", h.ListTaskStatusNotificationSubscriptions)
+			r.Put("/api/task-status-notifications", h.UpdateTaskStatusNotificationSubscription)
 
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {

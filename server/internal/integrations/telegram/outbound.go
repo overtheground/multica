@@ -67,6 +67,11 @@ type Outbound struct {
 	workerWG                 sync.WaitGroup
 	terminalWorkerWG         sync.WaitGroup
 
+	// notificationTurns, when set, identifies the chat turns that compose a
+	// task-status notification. Their reply is delivered by the notification
+	// outbox (notification_delivery.go), never streamed from here.
+	notificationTurns notificationTurnQueries
+
 	// objects is the deployment's object storage, or nil when there is none.
 	// Non-nil is what turns file delivery on (outbound_media.go).
 	objects objectStore
@@ -296,6 +301,17 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *h
 		spawn:              func(f func()) { go f() },
 	}
 	return o
+}
+
+// notificationTurnQueries is the one lookup SkipNotificationTurns needs.
+type notificationTurnQueries interface {
+	IsTaskStatusNotificationComposeTask(ctx context.Context, taskID pgtype.UUID) (bool, error)
+}
+
+// SkipNotificationTurns stops this Outbound from streaming, answering or
+// posting failure notices for notification turns.
+func (o *Outbound) SkipNotificationTurns(q notificationTurnQueries) {
+	o.notificationTurns = q
 }
 
 // Register subscribes to the transcript / completion / failure events.
@@ -1517,6 +1533,15 @@ func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*
 	}
 	if delivery.ChannelType != string(TypeTelegram) {
 		return nil, nil
+	}
+	if o.notificationTurns != nil {
+		isNotification, err := o.notificationTurns.IsTaskStatusNotificationComposeTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("check notification turn: %w", err)
+		}
+		if isNotification {
+			return nil, nil
+		}
 	}
 	binding := telegramBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{

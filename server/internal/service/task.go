@@ -4487,6 +4487,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 				return fmt.Errorf("write chat assistant outcome: %w", err)
 			}
 			chatAssistantMsg = msg
+			// A notification turn's reply and its outbox row commit together.
+			if err := attachTaskStatusNotificationReply(ctx, qtx, t, msg); err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {

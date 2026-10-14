@@ -276,6 +276,12 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindTaskStatusEvent is the server-authored, hidden input of a
+	// task-status notification turn: the facts of an issue result the agent
+	// turns into its own message to the member (MUL-11). Like the onboarding
+	// kickoff it reaches the runtime as the turn's input and is filtered out
+	// of member-facing APIs; the agent's reply is the visible message.
+	ChatMessageKindTaskStatusEvent = "task_status_event"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

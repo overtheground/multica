@@ -1383,6 +1383,9 @@ LEFT JOIN LATERAL (
     FROM chat_message AS input
     WHERE input.task_id = COALESCE(task.chat_input_task_id, task.id)
       AND input.role = 'user'
+      -- A notification turn's input is server-authored and hidden; its
+      -- queued entry previews as empty rather than as the member's words.
+      AND input.message_kind <> 'task_status_event'
     ORDER BY input.created_at ASC, input.id ASC
     LIMIT 1
 ) AS message ON TRUE
@@ -1515,7 +1518,7 @@ SELECT EXISTS (
     SELECT 1 FROM chat_message
     WHERE chat_session_id = $1
       AND role = 'user'
-      AND message_kind != 'channel_command'
+      AND message_kind NOT IN ('channel_command', 'task_status_event')
 ) AS has_public_user_message;
 
 -- name: CreateChatDraftRestore :one
