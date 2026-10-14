@@ -960,6 +960,17 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			tellUser:     false,
 			wantMentions: "multica chat history",
 		},
+		{
+			// Telegram persists both sides to chat_message (inbound through
+			// AppendUserMessage, replies through the completion transaction), and
+			// the Bot API has no history read at all — the stored transcript is
+			// the record. Telling the user the conversation was lost was false
+			// (MUL-11).
+			name:         "telegram rebuilds from the stored transcript",
+			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeTelegram},
+			tellUser:     false,
+			wantMentions: "multica chat history",
+		},
 	}
 
 	for _, tc := range cases {

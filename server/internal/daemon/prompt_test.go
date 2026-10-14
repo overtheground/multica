@@ -774,6 +774,20 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 				"You cannot attach a file to it",
 			},
 		},
+		{
+			// Telegram's transcript is stored in chat_message like DingTalk's,
+			// so the agent is pointed at `multica chat history` rather than told
+			// no reader exists (MUL-11).
+			name:          "telegram: has transcript history",
+			channelType:   execenv.ChannelTypeTelegram,
+			deliversFiles: true,
+			wantUpload:    true,
+			wantHistory:   true,
+			wantPhrases: []string{
+				"Telegram",
+				"read it back with `multica chat history`",
+			},
+		},
 	}
 
 	for _, tc := range cases {

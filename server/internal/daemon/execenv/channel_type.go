@@ -23,14 +23,17 @@ const (
 // SurfacePersistsTranscript reports whether a chat surface stores its
 // conversation in Multica's chat_message table, readable back via `multica chat
 // history` (handler/chat_history.go's non-Slack fallback). Web chat (empty
-// discriminator), Feishu, WeCom and DingTalk all persist via the shared
-// AppendUserMessage path; Slack reads the live channel instead. It is the single
+// discriminator), Feishu, WeCom, DingTalk and Telegram all persist via the
+// shared AppendUserMessage path, and every agent reply is stored by the chat
+// completion transaction; Slack reads the live channel instead. Telegram's Bot
+// API cannot read a chat's history back at all, so the stored transcript is
+// the only record there is. It is the single
 // source of truth for "which surfaces are readable", shared by the
 // continuity-notice router, the chat-prompt history copy, and the surface list —
 // so a future non-persisting channel is never told "read it back".
 func SurfacePersistsTranscript(channelType string) bool {
 	switch channelType {
-	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk:
+	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk, ChannelTypeTelegram:
 		return true
 	default:
 		return false

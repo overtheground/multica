@@ -544,7 +544,7 @@ func writeInstructionPrecedence(b *strings.Builder) {
 //   - Slack: the conversation lives in the channel and `multica chat history` /
 //     `multica chat thread` can fetch it — see buildChatPrompt, which hands the
 //     agent exactly those commands. Recoverable, just from a different place.
-//   - Web chat, Feishu, WeCom and DingTalk: the conversation is persisted in
+//   - Web chat, Feishu, WeCom, DingTalk and Telegram: the conversation is persisted in
 //     Multica's chat_message table and `multica chat history` reads it back —
 //     see handler/chat_history.go's chat_message fallback for non-Slack
 //     sessions. Recoverable, just from a different place. The readable set is
@@ -582,7 +582,7 @@ const SessionContinuityNoticeChatTranscript = "## Session Continuity Notice\n\n"
 
 // SessionContinuityNoticeUnrecoverable is the defensive fallback for a surface
 // whose conversation Multica never stored and cannot read back. Every current
-// chat surface (web chat, Feishu, WeCom, DingTalk, Slack) persists a transcript
+// chat surface (web chat, Feishu, WeCom, DingTalk, Telegram, Slack) persists a transcript
 // that `multica chat history` can fetch, so no surface routes here today — it
 // exists so a future channel that stores no transcript degrades to an honest
 // "this is a new session" instead of silently pretending continuity. Unlike the
