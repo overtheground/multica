@@ -40,11 +40,45 @@ func sessionContinuityNoticeFor(task Task) string {
 // hand-written strings. Deriving the backend's copy from the daemon's, and
 // suppressing it exactly when the prompt already said it, makes a duplicate
 // structurally impossible rather than merely unlikely.
+//
+// A chat run that lands on a fresh thread has also lost the conversation the
+// thread held, so the backend's copy carries the stored transcript too —
+// exactly the block buildChatPrompt renders when the daemon already knows.
 func backendResumeContinuityNotice(task Task) string {
 	if task.PriorSessionResumeUnavailable {
 		return ""
 	}
-	return sessionContinuityNoticeFor(task)
+	return sessionContinuityNoticeFor(task) + buildChatHistoryBlock(task.ChatHistory)
+}
+
+// chatHistoryNeeded reports whether this run starts without the provider
+// session that holds the conversation so far: none to resume, or the one it
+// resumes is older than the latest turn. A resumed session already has every
+// earlier message, so rendering them again would show each one twice.
+func chatHistoryNeeded(task Task) bool {
+	return task.PriorSessionID == "" || task.PriorSessionResumeUnavailable
+}
+
+var chatHistoryTagEscaper = strings.NewReplacer(
+	"</message", "<\\/message",
+	"</conversation_history", "<\\/conversation_history",
+)
+
+// buildChatHistoryBlock renders the stored conversation before this turn's
+// input (handler/chat_prompt_history.go), oldest first, each message with the
+// role it was stored under. Returns "" when there is none.
+func buildChatHistoryBlock(entries []ChatHistoryEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Earlier messages in this conversation, oldest first. This run does not continue your previous session, so they are given here once, as stored; role=\"assistant\" messages are your own, including ones you sent first:\n")
+	b.WriteString("<conversation_history>\n")
+	for _, m := range entries {
+		fmt.Fprintf(&b, "<message role=%q sent_at=%q>\n%s\n</message>\n", m.Role, m.CreatedAt, chatHistoryTagEscaper.Replace(m.Content))
+	}
+	b.WriteString("</conversation_history>\n\n")
+	return b.String()
 }
 
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
@@ -705,6 +739,9 @@ func buildChatPrompt(task Task) string {
 				b.WriteString("\n")
 			}
 		}
+	}
+	if chatHistoryNeeded(task) {
+		b.WriteString(buildChatHistoryBlock(task.ChatHistory))
 	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via

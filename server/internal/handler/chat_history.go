@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ChatChannelHistoryReader reads a chat session's bound IM-channel history. The
@@ -108,6 +109,11 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 	out := make([]channel.HistoryMessage, 0, len(messages))
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
+		if m.MessageKind == protocol.ChatMessageKindTaskStatusEvent {
+			// A notification turn's server-authored input; the member never
+			// wrote or saw it. The agent's reply to it follows as its own.
+			continue
+		}
 		role := channel.HistoryRoleUser
 		if m.Role == "assistant" {
 			role = channel.HistoryRoleAssistant

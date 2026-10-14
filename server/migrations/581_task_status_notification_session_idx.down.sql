@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY IF EXISTS task_status_notification_session_idx;

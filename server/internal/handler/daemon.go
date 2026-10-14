@@ -3306,6 +3306,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 
+		// The conversation before this turn, for a run that cannot resume its
+		// session (chat_prompt_history.go). Best effort: without it the run
+		// still has its input and `multica chat history`.
+		if chatPromptHistoryAllowed(*task, resp) {
+			history, err := h.loadChatPromptHistory(r.Context(), cs.ID, task.ChannelContextRevision, unanswered)
+			if err != nil {
+				slog.Warn("chat claim: load prompt history failed; claiming without it",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", err)
+			}
+			resp.ChatHistory = history
+		}
+
 		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
 			resp.ThreadName = resp.ChatMessage
 		}

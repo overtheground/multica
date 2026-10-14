@@ -226,7 +226,7 @@ func TestGetChatHistory_NoSlackBindingFallsBackToTranscript(t *testing.T) {
 // no Slack binding but DOES have stored chat_message rows, the fallback returns
 // those messages (oldest-first), so an agent can rebuild a web chat / Feishu
 // conversation instead of being told nothing is readable. Channel-command rows
-// are excluded, matching what the frontend shows.
+// and notification event inputs are excluded, matching what the frontend shows.
 func TestGetChatHistory_NoSlackBindingReadsStoredTranscript(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
@@ -240,6 +240,8 @@ func TestGetChatHistory_NoSlackBindingReadsStoredTranscript(t *testing.T) {
 	insertChatVisibilityMessage(t, sessionID, "first user turn", "message", true, base)
 	insertChatMessageRole(t, sessionID, "assistant", "assistant reply", "message", true, base.Add(time.Second))
 	insertChatVisibilityMessage(t, sessionID, "/issue hidden", "channel_command", true, base.Add(2*time.Second))
+	// A task-status notification's server-authored input is not a member turn.
+	insertChatVisibilityMessage(t, sessionID, "[Multica task status event]", "task_status_event", true, base.Add(2500*time.Millisecond))
 	insertChatVisibilityMessage(t, sessionID, "second user turn", "message", true, base.Add(3*time.Second))
 
 	w := httptest.NewRecorder()

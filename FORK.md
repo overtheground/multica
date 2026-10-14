@@ -12,7 +12,9 @@ When an agent run on an issue ends with the issue in `blocked`, `in_review` or
 member subscribed to writes them a short message. The message goes into the
 member's canonical private chat with that agent and is delivered to the
 private Telegram chat with the same bot. Replies, including replies to old
-notifications, carry the exact stored text back to the agent. The feature is
+notifications, carry the exact stored text back to the agent. An ordinary
+follow-up stays exactly as the member wrote it: the notification is already
+the agent's own previous message in that chat. The feature is
 off for everyone until a member enables it for their own account:
 `multica user task-notifications enable --agent <name>`, or
 `PUT /api/task-status-notifications`.
@@ -22,12 +24,14 @@ The flow:
 | Step | Where |
 | --- | --- |
 | Capture: triggers write durable events in the same transaction as the change | `server/migrations/573_task_status_notification.*` |
-| Indexes, one per migration | `server/migrations/574`–`582` |
+| Indexes, one per migration | `server/migrations/574`–`581` |
 | Decide: settle window, staleness, dedup, rate limit, route checks | `server/internal/service/task_status_notification.go` |
 | Compose: a hidden event input plus a chat turn of the agent | same file, `EnqueueTaskStatusNotificationTurn` |
 | Finalize: the agent's reply and the outbox row commit together | `server/internal/service/task.go`, `CompleteTaskWithTransition` |
 | Deliver: durable outbox, lease, 429, unknown and refused outcomes, ledger | `server/internal/integrations/telegram/notification_delivery.go` |
-| Reply context: canonical text for replies and unanswered notifications | `server/internal/integrations/telegram/notification_context.go`, `resolvers.go` |
+| Reply context: canonical text for a reply to a notification | `server/internal/integrations/telegram/notification_context.go`, `resolvers.go` |
+| Chat history for a run that cannot resume its session: the claim ships the stored conversation, the daemon renders it only without a resumed session (MUL-14) | `server/internal/handler/chat_prompt_history.go`, `daemon.go`, `agent.go`; `server/internal/daemon/prompt.go`, `types.go` |
+| `multica chat history` omits the hidden event input | `server/internal/handler/chat_history.go` |
 | Streaming path skips notification turns | `server/internal/integrations/telegram/outbound.go` |
 | Hidden input kind | `server/pkg/protocol/messages.go`, `server/internal/handler/chat.go`, `server/pkg/db/queries/chat.sql` |
 | Subscription API | `server/internal/handler/task_status_notification.go`, `server/cmd/server/router.go` |
@@ -41,9 +45,16 @@ includes Telegram (`server/internal/daemon/execenv/channel_type.go`). This part
 is daemon-side. It takes effect only on daemons built from this fork; a stock
 daemon still tells the agent that Telegram history is unreadable.
 
+The chat history a fresh run starts from (`chat_history` on the claim) is
+likewise rendered only by a daemon built from this fork. A stock daemon
+ignores the field: its turns still resume their session as before, but a run
+that starts without one sees only the new message.
+
 Tests:
 
 - `server/internal/handler/task_status_notification_test.go`
+- `server/internal/handler/chat_prompt_history_test.go`, a row in
+  `chat_history_test.go`
 - `server/internal/integrations/telegram/notification_context_test.go`
 - `server/internal/daemon/prompt_task_status_notification_test.go`
 - rows added to `server/internal/daemon/daemon_test.go`, `prompt_test.go`
@@ -62,7 +73,7 @@ Tests:
    ```
 
 2. Migration numbers: upstream keeps adding `server/migrations/NNN_*`. If
-   upstream reuses numbers 573–582, rename this fork's files to numbers after
+   upstream reuses numbers 573–581, rename this fork's files to numbers after
    upstream's last migration. Keep each concurrent index in its own file, and
    update the keys in `concurrentIndexCleanups` in `server/cmd/migrate/main.go`.
    Never renumber migrations a deployed database has already applied: check
@@ -74,7 +85,7 @@ Tests:
 
    ```
    cd server
-   go test ./internal/handler/ -run 'TestTaskStatusNotification|TestWorkspaceDeletion' -count=1
+   go test ./internal/handler/ -run 'TestTaskStatusNotification|TestWorkspaceDeletion|TestChatPromptHistory|TestGetChatHistory' -count=1
    go test ./internal/integrations/telegram/ ./internal/service/ ./internal/daemon/... ./cmd/migrate/ -count=1
    go test ./... -count=1        # full backend suite before deploying
    ```
@@ -87,6 +98,10 @@ Tests:
    - `enqueueChatTaskTx`: keep the lock order session → agent → binding →
      generation in `EnqueueTaskStatusNotificationTurn`;
    - Telegram `resolveTarget` and `sessionBinder`;
+   - the chat branch of `buildClaimedTaskResponse` (`handler/daemon.go`) and
+     the resume gates before `BuildPrompt` in `daemon/daemon.go`: history is
+     rendered exactly when `PriorSessionID` is empty or
+     `PriorSessionResumeUnavailable` is set;
    - the workspace deletion manifest.
 
 ## Deploying a specific version

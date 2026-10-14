@@ -210,8 +210,8 @@ type chatSession interface {
 
 type sessionBinder struct {
 	session chatSession
-	// notifications resolves what a private message answers when the agent
-	// spoke first (notification_context.go). Nil leaves bodies untouched.
+	// notifications resolves which notification a private reply answers
+	// (notification_context.go). Nil leaves bodies untouched.
 	notifications *notificationContext
 }
 
@@ -237,7 +237,7 @@ func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionP
 			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
 		},
 		Initiator: p.Sender,
-		Body:      r.notifications.enrich(ctx, p.Installation.ID, pgtype.UUID{}, p.Sender, p.Message), CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		Body:      r.notifications.enrich(ctx, p.Installation.ID, p.Sender, p.Message), CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
 		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
 		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
 		BeforeCommit: p.BeforeCommit,
@@ -262,7 +262,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		SessionID:           p.SessionID,
 		Sender:              p.Sender,
 		InstallationID:      p.InstallationID,
-		Body:                r.notifications.enrich(ctx, p.InstallationID, p.SessionID, p.Sender, p.Message),
+		Body:                r.notifications.enrich(ctx, p.InstallationID, p.Sender, p.Message),
 		CommandText:         commandText,
 		MessageID:           p.Message.MessageID,
 		ThreadID:            replyThread,

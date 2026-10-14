@@ -1106,67 +1106,6 @@ func (q *Queries) ListTaskStatusNotificationSubscriptionsForUser(ctx context.Con
 	return items, nil
 }
 
-const listUnansweredTaskStatusNotifications = `-- name: ListUnansweredTaskStatusNotifications :many
-SELECT
-    n.id AS notification_id, n.chat_message_id, n.issue_id, n.issue_status, n.sent_at,
-    cm.content
-FROM task_status_notification AS n
-JOIN chat_message AS cm ON cm.id = n.chat_message_id
-WHERE n.chat_session_id = $1
-  AND n.state = 'sent'
-  AND cm.created_at > COALESCE((
-      SELECT max(u.created_at) FROM chat_message AS u
-      WHERE u.chat_session_id = $1
-        AND u.role = 'user'
-        AND u.message_kind <> 'task_status_event'
-  ), '-infinity'::timestamptz)
-ORDER BY cm.created_at DESC
-LIMIT $2
-`
-
-type ListUnansweredTaskStatusNotificationsParams struct {
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-	MaxItems      int32       `json:"max_items"`
-}
-
-type ListUnansweredTaskStatusNotificationsRow struct {
-	NotificationID pgtype.UUID        `json:"notification_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	IssueStatus    string             `json:"issue_status"`
-	SentAt         pgtype.Timestamptz `json:"sent_at"`
-	Content        string             `json:"content"`
-}
-
-// Notifications delivered into a session after the member last wrote in it:
-// what an ordinary follow-up message is most likely answering.
-func (q *Queries) ListUnansweredTaskStatusNotifications(ctx context.Context, arg ListUnansweredTaskStatusNotificationsParams) ([]ListUnansweredTaskStatusNotificationsRow, error) {
-	rows, err := q.db.Query(ctx, listUnansweredTaskStatusNotifications, arg.ChatSessionID, arg.MaxItems)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListUnansweredTaskStatusNotificationsRow{}
-	for rows.Next() {
-		var i ListUnansweredTaskStatusNotificationsRow
-		if err := rows.Scan(
-			&i.NotificationID,
-			&i.ChatMessageID,
-			&i.IssueID,
-			&i.IssueStatus,
-			&i.SentAt,
-			&i.Content,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const markTaskStatusNotificationEventProcessed = `-- name: MarkTaskStatusNotificationEventProcessed :exec
 UPDATE task_status_notification_event
 SET processed_at = now(), outcome = $1

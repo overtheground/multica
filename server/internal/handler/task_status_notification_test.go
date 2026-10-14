@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -244,16 +245,29 @@ func (e *tsnEnv) sessionID() string {
 }
 
 type tsnClaim struct {
-	ID              string `json:"id"`
-	ChatMessage     string `json:"chat_message"`
-	ChatChannelType string `json:"chat_channel_type"`
-	ChatType        string `json:"chat_type"`
+	ID                            string             `json:"id"`
+	ChatMessage                   string             `json:"chat_message"`
+	ChatChannelType               string             `json:"chat_channel_type"`
+	ChatType                      string             `json:"chat_type"`
+	PriorSessionID                string             `json:"prior_session_id"`
+	PriorSessionResumeUnavailable bool               `json:"prior_session_resume_unavailable"`
+	ChatHistory                   []ChatHistoryEntry `json:"chat_history"`
+	// Raw is the claimed task exactly as the daemon decodes it.
+	Raw json.RawMessage `json:"-"`
 }
 
 // claimAndComplete claims the next task of the runtime through the daemon
 // handler — the same response the agent's daemon receives — and completes it
 // with output as the agent's final answer.
 func (e *tsnEnv) claimAndComplete(output string) tsnClaim {
+	e.t.Helper()
+	return e.claimAndCompleteInSession(output, "", false)
+}
+
+// claimAndCompleteInSession is claimAndComplete for a turn that reports the
+// provider session it ran in, or (rolloutMissing) one whose Codex rollout
+// never reached disk.
+func (e *tsnEnv) claimAndCompleteInSession(output, sessionID string, rolloutMissing bool) tsnClaim {
 	e.t.Helper()
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+e.runtimeID+"/claim", nil, e.workspaceID, e.daemonID)
@@ -265,16 +279,21 @@ func (e *tsnEnv) claimAndComplete(output string) tsnClaim {
 		e.t.Fatalf("claim: %d %s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		Task *tsnClaim `json:"task"`
+		Task json.RawMessage `json:"task"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil || resp.Task == nil {
+	var task tsnClaim
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil || len(resp.Task) == 0 || string(resp.Task) == "null" {
 		e.t.Fatalf("claim decoded no task (err=%v)", err)
 	}
-	markTaskRunning(e.t, e.ctx, resp.Task.ID)
-	if _, err := testHandler.TaskService.CompleteTask(e.ctx, parseUUID(resp.Task.ID), completeResult(e.t, output), "", "", "", false, "", ""); err != nil {
+	if err := json.Unmarshal(resp.Task, &task); err != nil {
+		e.t.Fatalf("decode claimed task: %v", err)
+	}
+	task.Raw = resp.Task
+	markTaskRunning(e.t, e.ctx, task.ID)
+	if _, err := testHandler.TaskService.CompleteTask(e.ctx, parseUUID(task.ID), completeResult(e.t, output), sessionID, "", "", rolloutMissing, "", ""); err != nil {
 		e.t.Fatalf("complete task: %v", err)
 	}
-	return *resp.Task
+	return task
 }
 
 // subscribe enables notifications for the member through the API.
@@ -571,32 +590,131 @@ func TestTaskStatusNotificationTelegramEndToEnd(t *testing.T) {
 }
 
 // TestTaskStatusNotificationOrdinaryFollowUpSeesNotification: a message that
-// quotes nothing, sent after a notification, carries it.
+// quotes nothing, sent after a notification, is stored and handed to the agent
+// exactly as the member wrote it, and the notification reaches that turn once,
+// as the agent's own previous message — through the session it was written in
+// when that session resumes, and through the stored transcript when it cannot
+// (MUL-14).
 func TestTaskStatusNotificationOrdinaryFollowUpSeesNotification(t *testing.T) {
-	e := newTSNEnv(t)
-	e.openChat()
-	e.mustSubscribe()
-	issueID := e.fx.Issue(t, "Обновить зависимости", testutil.Cols{"status": "in_progress"})
-	e.finishIssueRun(issueID, "blocked", "Нужен доступ к реестру пакетов.")
-	e.tick()
+	const followUp = "ок, выдам доступ"
 	text := "TSN: обновление зависимостей заблокировано — нужен доступ к реестру пакетов."
-	e.claimAndComplete(text)
-	e.deliver()
 
-	e.inbound("ок, выдам доступ", 0)
-	body := e.latestUserMessage()
-	if !strings.Contains(body, "<recent_notifications") || !strings.Contains(body, text) || !strings.HasSuffix(body, "ок, выдам доступ") {
-		t.Fatalf("follow-up body lacks the unanswered notification:\n%s", body)
+	// notify opens the chat in session, has Mika compose the notification in
+	// it, delivers it, and returns her composing claim.
+	notify := func(e *tsnEnv, session string, rolloutMissing bool) tsnClaim {
+		e.inbound("Привет, Mika", 0)
+		e.claimAndCompleteInSession("Привет! Чем помочь?", session, false)
+		e.mustSubscribe()
+		issueID := e.fx.Issue(t, "Обновить зависимости", testutil.Cols{"status": "in_progress"})
+		e.finishIssueRun(issueID, "blocked", "Нужен доступ к реестру пакетов.")
+		e.tick()
+		compose := e.claimAndCompleteInSession(text, session, rolloutMissing)
+		if e.deliver() != 1 {
+			t.Fatal("notification not delivered")
+		}
+		return compose
 	}
-	claim := e.claimAndComplete("Спасибо!")
-	if !strings.Contains(claim.ChatMessage, text) {
-		t.Fatalf("the agent's follow-up turn lacks the notification:\n%s", claim.ChatMessage)
+	// followUpTurn sends the ordinary follow-up and claims the agent's turn.
+	followUpTurn := func(e *tsnEnv) tsnClaim {
+		e.inbound(followUp, 0)
+		if body := e.latestUserMessage(); body != followUp {
+			t.Fatalf("stored follow-up = %q, want the member's text verbatim", body)
+		}
+		claim := e.claimAndCompleteInSession("Спасибо!", "", false)
+		if claim.ChatMessage != followUp {
+			t.Fatalf("the turn's user input = %q, want the member's text verbatim", claim.ChatMessage)
+		}
+		return claim
 	}
-	// Answered now: the next message no longer repeats it.
-	e.inbound("и ещё вопрос", 0)
-	if body := e.latestUserMessage(); body != "и ещё вопрос" {
-		t.Fatalf("an answered notification was attached again:\n%s", body)
+	// prompt is what the daemon builds for the claimed turn on Codex.
+	prompt := func(claim tsnClaim) string {
+		var task daemon.Task
+		if err := json.Unmarshal(claim.Raw, &task); err != nil {
+			t.Fatalf("daemon decode of the claim: %v", err)
+		}
+		return daemon.BuildPrompt(task, "codex")
 	}
+	notificationAssistantMessage := "<message role=\"assistant\""
+	assertHistory := func(t *testing.T, claim tsnClaim) {
+		t.Helper()
+		var roles, contents []string
+		for _, m := range claim.ChatHistory {
+			roles = append(roles, m.Role)
+			contents = append(contents, m.Content)
+			if strings.Contains(m.Content, "task status event") {
+				t.Fatalf("history carries the hidden event input: %+v", claim.ChatHistory)
+			}
+		}
+		want := []string{"Привет, Mika", "Привет! Чем помочь?", text}
+		if strings.Join(contents, "|") != strings.Join(want, "|") || strings.Join(roles, ",") != "user,assistant,assistant" {
+			t.Fatalf("history = %+v, want the earlier conversation ending with the notification as the agent's message", claim.ChatHistory)
+		}
+	}
+
+	t.Run("resumed session already holds the notification", func(t *testing.T) {
+		e := newTSNEnv(t)
+		compose := notify(e, "codex-thread-1", false)
+		if compose.PriorSessionID != "codex-thread-1" {
+			t.Fatalf("notification turn resumes %q, want the conversation's session", compose.PriorSessionID)
+		}
+		claim := followUpTurn(e)
+		if claim.PriorSessionID != "codex-thread-1" || claim.PriorSessionResumeUnavailable {
+			t.Fatalf("follow-up resumes %q (unavailable=%t), want the session the notification was written in",
+				claim.PriorSessionID, claim.PriorSessionResumeUnavailable)
+		}
+		assertHistory(t, claim)
+		p := prompt(claim)
+		if strings.Contains(p, text) || strings.Contains(p, "<conversation_history>") {
+			t.Fatalf("a resumed turn got the notification a second time:\n%s", p)
+		}
+		if !strings.Contains(p, "User message:\n"+followUp+"\n") {
+			t.Fatalf("prompt lacks the member's verbatim message:\n%s", p)
+		}
+	})
+
+	t.Run("no session to resume, after a restart", func(t *testing.T) {
+		e := newTSNEnv(t)
+		notify(e, "", false)
+		e.router = e.newRouter()
+		claim := followUpTurn(e)
+		if claim.PriorSessionID != "" {
+			t.Fatalf("follow-up resumes %q, want a fresh run", claim.PriorSessionID)
+		}
+		assertHistory(t, claim)
+		p := prompt(claim)
+		if strings.Count(p, text) != 1 || strings.Count(p, notificationAssistantMessage) != 2 {
+			t.Fatalf("fresh run prompt must carry the notification once, as an assistant message:\n%s", p)
+		}
+		hist := strings.Index(p, "<conversation_history>")
+		user := strings.Index(p, "User message:\n"+followUp+"\n")
+		if hist < 0 || user < 0 || hist > user || strings.Index(p, text) > user {
+			t.Fatalf("history must precede the member's verbatim message:\n%s", p)
+		}
+	})
+
+	t.Run("notification turn's codex rollout went missing", func(t *testing.T) {
+		e := newTSNEnv(t)
+		notify(e, "codex-thread-1", true)
+		claim := followUpTurn(e)
+		if !claim.PriorSessionResumeUnavailable {
+			t.Fatalf("follow-up claim = %+v, want the continuity gap disclosed", claim)
+		}
+		assertHistory(t, claim)
+		if p := prompt(claim); strings.Count(p, text) != 1 {
+			t.Fatalf("a run that lost the notification's session must get it once from the transcript:\n%s", p)
+		}
+	})
+
+	t.Run("a member's fresh start inherits nothing", func(t *testing.T) {
+		e := newTSNEnv(t)
+		notify(e, "", false)
+		e.inbound("/clear", 0)
+		e.inbound(followUp, 0)
+		claim := e.claimAndComplete("Начнём заново.")
+		if len(claim.ChatHistory) != 0 {
+			t.Fatalf("fresh session got history: %+v", claim.ChatHistory)
+		}
+	})
 }
 
 // TestTaskStatusNotificationJudgesEventsAgainstTheCurrentIssue covers what is

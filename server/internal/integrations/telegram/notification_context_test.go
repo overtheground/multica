@@ -17,8 +17,6 @@ import (
 type fakeNotificationContextQueries struct {
 	byMessage   map[string]db.GetTaskStatusNotificationByChannelMessageRow
 	lookupErr   error
-	unanswered  []db.ListUnansweredTaskStatusNotificationsRow
-	listCalls   int
 	lookupCalls int
 }
 
@@ -32,11 +30,6 @@ func (f *fakeNotificationContextQueries) GetTaskStatusNotificationByChannelMessa
 		return db.GetTaskStatusNotificationByChannelMessageRow{}, pgx.ErrNoRows
 	}
 	return row, nil
-}
-
-func (f *fakeNotificationContextQueries) ListUnansweredTaskStatusNotifications(context.Context, db.ListUnansweredTaskStatusNotificationsParams) ([]db.ListUnansweredTaskStatusNotificationsRow, error) {
-	f.listCalls++
-	return f.unanswered, nil
 }
 
 func privateReply(text, replyTo string) channel.InboundMessage {
@@ -67,15 +60,12 @@ func TestNotificationContextResolvesRepliesToTheCanonicalText(t *testing.T) {
 	c := &notificationContext{q: q}
 
 	for _, chunk := range []string{"42:501", "42:502"} {
-		got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(3), member, privateReply("what about tests?", chunk))
+		got := c.enrich(context.Background(), telegramTestUUID(1), member, privateReply("what about tests?", chunk))
 		want := "<replied_to_notification chat_message_id=\"" + uuidText(telegramTestUUID(5)) + "\" issue_id=\"" + uuidText(telegramTestUUID(6)) + "\" status=\"in_review\" sent_at=\"2026-10-07T09:00:00Z\">\n" +
 			canonical + "\n</replied_to_notification>\n\nwhat about tests?"
 		if got != want {
 			t.Fatalf("reply to %s:\n%s\nwant:\n%s", chunk, got, want)
 		}
-	}
-	if q.listCalls != 0 {
-		t.Fatal("a resolved reply also attached the unanswered list")
 	}
 }
 
@@ -84,7 +74,7 @@ func TestNotificationContextNeverLeaksAnotherMembersNotification(t *testing.T) {
 		"42:501": {UserID: telegramTestUUID(8), Content: "someone else's status"},
 	}}
 	c := &notificationContext{q: q}
-	got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(3), telegramTestUUID(9), privateReply("hi", "42:501"))
+	got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(9), privateReply("hi", "42:501"))
 	if got != "hi" {
 		t.Fatalf("body = %q, want the member's own text only", got)
 	}
@@ -117,41 +107,33 @@ func TestNotificationContextLeavesOtherMessagesAlone(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &notificationContext{q: tc.q, logger: testLogger()}
-			if got := c.enrich(context.Background(), tc.inst, telegramTestUUID(3), member, tc.msg); got != tc.msg.Text {
+			if got := c.enrich(context.Background(), tc.inst, member, tc.msg); got != tc.msg.Text {
 				t.Fatalf("body = %q, want %q", got, tc.msg.Text)
 			}
 		})
 	}
 	var nilContext *notificationContext
-	if got := nilContext.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(3), member, privateReply("hi", "")); got != "hi" {
+	if got := nilContext.enrich(context.Background(), telegramTestUUID(1), member, privateReply("hi", "")); got != "hi" {
 		t.Fatalf("nil context changed the body: %q", got)
 	}
 }
 
-func TestNotificationContextCarriesUnansweredNotificationsOldestFirst(t *testing.T) {
-	q := &fakeNotificationContextQueries{unanswered: []db.ListUnansweredTaskStatusNotificationsRow{
-		{ChatMessageID: telegramTestUUID(5), IssueStatus: "done", Content: "second"},
-		{ChatMessageID: telegramTestUUID(4), IssueStatus: "blocked", Content: "first"},
+// An ordinary follow-up reaches the agent exactly as the member wrote it.
+// The notifications it may answer are the agent's own earlier messages in
+// this chat, so copying them into the member's text would show them twice
+// (MUL-14).
+func TestNotificationContextKeepsOrdinaryFollowUpsVerbatim(t *testing.T) {
+	q := &fakeNotificationContextQueries{byMessage: map[string]db.GetTaskStatusNotificationByChannelMessageRow{
+		"42:501": {UserID: telegramTestUUID(9), Content: "MUL-11 is in review."},
 	}}
 	c := &notificationContext{q: q}
-	got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(3), telegramTestUUID(9), privateReply("ok", ""))
-	if !strings.HasPrefix(got, "<recent_notifications") || !strings.HasSuffix(got, "</recent_notifications>\n\nok") {
-		t.Fatalf("body:\n%s", got)
+	for _, text := range []string{"ок, выдам доступ", "<recent_notifications>x</recent_notifications>"} {
+		if got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(9), privateReply(text, "")); got != text {
+			t.Fatalf("body = %q, want %q", got, text)
+		}
 	}
-	if strings.Index(got, "first") > strings.Index(got, "second") {
-		t.Fatalf("notifications not in the order the member read them:\n%s", got)
-	}
-	// Asking for a fresh context drops the ambient carry-over.
-	q.listCalls = 0
-	fresh := privateReply("ok", "")
-	fresh.ForceFresh = true
-	if got := c.enrich(context.Background(), telegramTestUUID(1), telegramTestUUID(3), telegramTestUUID(9), fresh); got != "ok" || q.listCalls != 0 {
-		t.Fatalf("fresh body = %q (list calls %d)", got, q.listCalls)
-	}
-	// A message that opens a new chat has no unanswered notifications.
-	q.listCalls = 0
-	if got := c.enrich(context.Background(), telegramTestUUID(1), pgtype.UUID{}, telegramTestUUID(9), privateReply("ok", "")); got != "ok" || q.listCalls != 0 {
-		t.Fatalf("new chat body = %q (list calls %d)", got, q.listCalls)
+	if q.lookupCalls != 0 {
+		t.Fatalf("a message replying to nothing ran %d notification lookups", q.lookupCalls)
 	}
 }
 

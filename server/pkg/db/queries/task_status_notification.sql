@@ -369,22 +369,3 @@ JOIN task_status_notification AS n ON n.id = m.notification_id
 JOIN chat_message AS cm ON cm.id = m.chat_message_id
 WHERE m.installation_id = @installation_id
   AND m.channel_message_id = @channel_message_id;
-
--- name: ListUnansweredTaskStatusNotifications :many
--- Notifications delivered into a session after the member last wrote in it:
--- what an ordinary follow-up message is most likely answering.
-SELECT
-    n.id AS notification_id, n.chat_message_id, n.issue_id, n.issue_status, n.sent_at,
-    cm.content
-FROM task_status_notification AS n
-JOIN chat_message AS cm ON cm.id = n.chat_message_id
-WHERE n.chat_session_id = @chat_session_id
-  AND n.state = 'sent'
-  AND cm.created_at > COALESCE((
-      SELECT max(u.created_at) FROM chat_message AS u
-      WHERE u.chat_session_id = @chat_session_id
-        AND u.role = 'user'
-        AND u.message_kind <> 'task_status_event'
-  ), '-infinity'::timestamptz)
-ORDER BY cm.created_at DESC
-LIMIT @max_items;

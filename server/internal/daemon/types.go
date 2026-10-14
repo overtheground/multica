@@ -133,6 +133,7 @@ type Task struct {
 	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`                   // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage                   string                 `json:"chat_message,omitempty"`                     // user message content for chat tasks
 	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`         // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	ChatHistory                   []ChatHistoryEntry     `json:"chat_history,omitempty"`                     // stored conversation before this turn's input, oldest first. Rendered only when the run starts without its prior session, which already holds it. Absent on old servers
 	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                       // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"`     // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
 	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`                 // non-empty for autopilot run_only tasks
@@ -185,6 +186,14 @@ type Task struct {
 // so the chat prompt can list them explicitly and instruct the agent to
 // run `multica attachment download <id>` instead of guessing from a
 // signed CDN URL (which expires).
+// ChatHistoryEntry mirrors handler.ChatHistoryEntry: one stored chat message.
+type ChatHistoryEntry struct {
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
 type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
