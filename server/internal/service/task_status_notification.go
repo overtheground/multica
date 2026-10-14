@@ -420,8 +420,8 @@ const (
 	taskStatusNotificationBatch         = 20
 	// taskStatusNotificationRecheck spaces re-judging an event that has to
 	// wait: a run still active on the issue, or a briefly unavailable route.
-	taskStatusNotificationRecheck = 30 * time.Second
-	taskStatusNotificationCommentLimit  = 1500
+	taskStatusNotificationRecheck      = 30 * time.Second
+	taskStatusNotificationCommentLimit = 1500
 	// TaskStatusNotificationMaxAge drops events that waited longer than this
 	// — after an outage, a day-old result is history, not news.
 	TaskStatusNotificationMaxAge = 24 * time.Hour
@@ -512,6 +512,13 @@ func (n *TaskStatusNotifier) Tick(ctx context.Context) (int, error) {
 		if outcome == outcomeDeferred {
 			continue
 		}
+		// Every verdict is logged: a suppressed result leaves no chat turn
+		// and no notification row, so without this line the only trace of
+		// "why was nothing sent" is the event table.
+		n.logger().InfoContext(ctx, "task status notification event judged",
+			"event_id", util.UUIDToString(ev.ID), "issue_id", util.UUIDToString(ev.IssueID),
+			"source", ev.Source, "issue_status", ev.IssueStatus, "task_status", ev.TaskStatus.String,
+			"outcome", outcome)
 		if err := n.Queries.MarkTaskStatusNotificationEventProcessed(ctx, db.MarkTaskStatusNotificationEventProcessedParams{
 			ID: ev.ID, Outcome: pgtype.Text{String: outcome, Valid: true},
 		}); err != nil {

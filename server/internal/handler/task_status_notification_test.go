@@ -1233,3 +1233,58 @@ func TestTaskStatusNotificationSubscriptionAPI(t *testing.T) {
 	}
 	_ = util.UUIDToString
 }
+
+// TestTaskStatusNotificationInReviewAfterDeliveredDone replays the MUL-19
+// sequence: a done result is delivered, the member keeps chatting, then several
+// parallel runs end in in_review with long final comments. Statuses are
+// written without naming an actor, as production's issue writes do. Each
+// result must still reach the agent as its own turn.
+func TestTaskStatusNotificationInReviewAfterDeliveredDone(t *testing.T) {
+	e := newTSNEnv(t)
+	e.openChat()
+	e.mustSubscribe()
+
+	runWithoutActor := func(issueID, status, comment string) {
+		t.Helper()
+		taskID := e.fx.Task(t, e.workerID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": e.runtimeID, "status": "running",
+			"started_at": testutil.Raw("now()"), "dispatched_at": testutil.Raw("now()"),
+		})
+		e.fx.Comment(t, issueID, comment, testutil.Cols{"author_type": "agent", "author_id": e.workerID, "source_task_id": taskID})
+		e.fx.Exec(t, `UPDATE issue SET status = $2, revision = revision + 1 WHERE id = $1`, issueID, status)
+		if _, err := testHandler.TaskService.CompleteTask(e.ctx, parseUUID(taskID), completeResult(t, ""), "", "", "", false, "", ""); err != nil {
+			t.Fatalf("complete issue run: %v", err)
+		}
+	}
+
+	done := e.fx.Issue(t, "234 × 432", testutil.Cols{"status": "in_progress"})
+	runWithoutActor(done, "done", "234 × 432 = **101088**")
+	e.tick()
+	if got := e.eventOutcomes(done); len(got) != 2 || got[0] != "suppressed:superseded" || got[1] != "notified" {
+		t.Fatalf("done events = %v, want the run's capture to supersede the status capture", got)
+	}
+	e.claimAndComplete("234 × 432 = 101088")
+	if e.deliver() != 1 {
+		t.Fatal("done result not delivered")
+	}
+	e.inbound("спасибо", 0)
+	e.claimAndComplete("пожалуйста")
+
+	long := "## Итог\n\n" + strings.Repeat("Готово к ревью: изменения в ветке, тесты зелёные. ", 120)
+	var issues []string
+	for i := 0; i < 5; i++ {
+		issues = append(issues, e.fx.Issue(t, "результат "+strconv.Itoa(i), testutil.Cols{"status": "in_progress"}))
+	}
+	for _, id := range issues {
+		runWithoutActor(id, "in_review", long)
+	}
+	e.tick()
+	for i, id := range issues {
+		if got := e.eventOutcomes(id); len(got) != 1 || got[0] != "notified" {
+			t.Fatalf("in_review result %d events = %v, want notified", i, got)
+		}
+		if notes := e.notifications(id); len(notes) != 1 || notes[0].State != service.TaskStatusNotificationComposing {
+			t.Fatalf("in_review result %d notifications = %+v, want one composing", i, notes)
+		}
+	}
+}

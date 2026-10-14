@@ -155,7 +155,11 @@ func (d *NotificationDelivery) deliver(ctx context.Context, n db.TaskStatusNotif
 	if err := d.complete(ctx, n, chatID); err != nil {
 		d.logger.ErrorContext(ctx, "telegram notifications: completing delivery failed",
 			"notification_id", util.UUIDToString(n.ID), "error", err)
+		return
 	}
+	d.logger.InfoContext(ctx, "telegram notifications: delivered",
+		"notification_id", util.UUIDToString(n.ID), "issue_id", util.UUIDToString(n.IssueID),
+		"issue_status", n.IssueStatus, "chunks", len(chunks))
 }
 
 // prepare re-verifies the route and loads the canonical text. A non-empty
