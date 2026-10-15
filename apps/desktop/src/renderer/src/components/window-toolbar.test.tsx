@@ -115,16 +115,16 @@ describe("WindowToolbar history controls", () => {
     rerender(<WindowToolbar />);
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(200);
-    expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
+    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(236);
+    expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "236px" });
   });
 
-  it("orders Back, Forward, then the sidebar toggle with no separate History button", () => {
+  it("orders Back, Forward, sidebar toggle, and Reload without a separate History button", () => {
     render(<WindowToolbar />);
 
     expect(
       screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Go back", "Go forward", "Toggle sidebar"]);
+    ).toEqual(["Go back", "Go forward", "Toggle sidebar", "Reload page"]);
     expect(screen.queryByRole("button", { name: "History" })).toBeNull();
   });
 
