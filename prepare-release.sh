@@ -36,6 +36,10 @@ tag="${UPSTREAM_SYNC_TAG:-$(meta "$issue" upstream_sync_tag)}"  # override: manu
 [[ -n "$tag" ]] || die "issue $issue has no upstream_sync_tag metadata"
 base_branch=$(meta "$REGISTRY_ISSUE" upstream_sync_base_branch)
 [[ -n "$base_branch" ]] || die "registry has no upstream_sync_base_branch"
+# What production runs now. The base must contain it, so a stale base branch
+# cannot drop deployed fixes or applied migrations.
+deployed_sha=$(meta "$REGISTRY_ISSUE" upstream_sync_deployed_sha)
+[[ -n "$deployed_sha" ]] || die "registry has no upstream_sync_deployed_sha"
 sync_branch="sync/$tag"
 rollback_tag="pre-sync/$tag"
 
@@ -66,11 +70,16 @@ start)
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
 
   base_sha=$(git rev-parse "fork/$base_branch")
+  git merge-base --is-ancestor "$deployed_sha" "$base_sha" \
+    || die "fork/$base_branch ($base_sha) does not contain deployed $deployed_sha; fix upstream_sync_base_branch in the registry"
+  ahead=$(git log --oneline "$deployed_sha..$base_sha")
+  [[ -n "$ahead" ]] && { echo "NOTE: $base_branch has commits not yet deployed (they go into the sync branch):"; echo "$ahead"; }
   if git merge-base --is-ancestor "$tag_sha" "$base_sha"; then
     die "$tag is already contained in $base_branch ($base_sha); nothing to merge"
   fi
   set_meta "$issue" upstream_sync_base_branch "$base_branch"
   set_meta "$issue" upstream_sync_base_sha "$base_sha"
+  set_meta "$issue" upstream_sync_deployed_sha "$deployed_sha"
   set_meta "$issue" upstream_sync_state merging
 
   git switch --quiet --detach "$base_sha"
@@ -92,6 +101,13 @@ finish)
   [[ -z "$(git status --porcelain --untracked-files=no)" ]] || die "uncommitted changes; commit the merge first"
   git merge-base --is-ancestor "$tag_sha" HEAD || die "HEAD does not contain $tag"
   git merge-base --is-ancestor "$base_sha" HEAD || die "HEAD does not contain base $base_sha"
+  git merge-base --is-ancestor "$deployed_sha" HEAD || die "HEAD does not contain deployed $deployed_sha"
+
+  # Migrations are append-only: every file production has applied stays
+  # byte-identical under its name; upstream and fork only add files.
+  touched=$(git diff --name-status "$deployed_sha" HEAD -- server/migrations/ | grep -v '^A' || true)
+  [[ -z "$touched" ]] || die "deployed migrations were changed, renamed or removed:
+$touched"
 
   # Upstream license files stay exactly upstream's; FORK.md must survive.
   git diff --quiet "$tag_sha" HEAD -- LICENSE NOTICE || die "LICENSE/NOTICE differ from upstream $tag"
