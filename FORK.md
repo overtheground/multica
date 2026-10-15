@@ -23,8 +23,8 @@ The flow:
 
 | Step | Where |
 | --- | --- |
-| Capture: triggers write durable events in the same transaction as the change | `server/migrations/573_task_status_notification.*`, result status: `582_task_status_notification_result_status.*` |
-| Indexes, one per migration | `server/migrations/574`–`581` |
+| Capture: triggers write durable events in the same transaction as the change | `server/migrations/573_task_status_notification.*`; judged by result status since `583_task_status_notification_result_status.*` |
+| Indexes, one per migration | `server/migrations/574`–`582` (`581_…session_idx` is no longer read by any query; it stays because deployed databases applied it) |
 | Decide: settle window, staleness, dedup, rate limit, route checks | `server/internal/service/task_status_notification.go` |
 | Compose: a hidden event input plus a chat turn of the agent | same file, `EnqueueTaskStatusNotificationTurn` |
 | Finalize: the agent's reply and the outbox row commit together | `server/internal/service/task.go`, `CompleteTaskWithTransition` |
@@ -72,13 +72,16 @@ Tests:
    git merge upstream/main
    ```
 
-2. Migration numbers: upstream keeps adding `server/migrations/NNN_*`. If
-   upstream reuses numbers 573–582, rename this fork's files to numbers after
-   upstream's last migration. Keep each concurrent index in its own file, and
-   update the keys in `concurrentIndexCleanups` in `server/cmd/migrate/main.go`.
-   Never renumber migrations a deployed database has already applied: check
-   `schema_migrations` on the target first. If it already holds this fork's
-   numbers, move upstream's conflicting files after them instead.
+2. Migrations: this fork's files 573–582 are applied on the production
+   database, and 583 is once this build is deployed. Never rename, renumber, delete or edit them, and never reuse
+   their names or numbers: `schema_migrations` records the full file name, so
+   a renamed file runs again and a deleted one leaves an orphan row. Fix
+   schema by adding a new migration after the last one. If upstream adds
+   files with the same numbers, keep both: each is recorded by its full name,
+   so upstream's apply as new versions. Verify the upgrade on a database that
+   already holds this fork's migrations before deploying. Keep each concurrent
+   index in its own file with its entry in `concurrentIndexCleanups`
+   (`server/cmd/migrate/main.go`).
 3. Regenerate queries with `make sqlc` (sqlc v1.31.1), then `go build ./...`.
 4. Run the checks against a disposable database
    (`DATABASE_URL=... go run ./cmd/migrate up` first):

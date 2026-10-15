@@ -794,7 +794,7 @@ type GetTaskStatusNotificationResultStatusParams struct {
 
 // The status key an issue's status counts as for notifications: built-ins are
 // themselves, custom done/closed statuses are done/cancelled, other custom
-// statuses stay their own key (migration 582).
+// statuses stay their own key (migration 583).
 func (q *Queries) GetTaskStatusNotificationResultStatus(ctx context.Context, arg GetTaskStatusNotificationResultStatusParams) (string, error) {
 	row := q.db.QueryRow(ctx, getTaskStatusNotificationResultStatus, arg.WorkspaceID, arg.StatusKey)
 	var result_status string

@@ -326,7 +326,7 @@ SELECT * FROM task_status_notification WHERE id = @id;
 -- name: GetTaskStatusNotificationResultStatus :one
 -- The status key an issue's status counts as for notifications: built-ins are
 -- themselves, custom done/closed statuses are done/cancelled, other custom
--- statuses stay their own key (migration 582).
+-- statuses stay their own key (migration 583).
 SELECT task_status_notification_result_status(@workspace_id::uuid, @status_key::text)::text AS result_status;
 
 -- name: CreateChannelTaskDeliveryForNotification :one
