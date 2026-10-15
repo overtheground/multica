@@ -572,7 +572,7 @@
       "dialog_edit_title": "Edit MCP Server",
       "dialog_edit_title_named": "Edit configuration for {{name}}",
       "dialog_replace_title": "Replace configuration for {{name}}",
-      "dialog_replace_description": "To protect sensitive information, saved values aren't shown again. Enter the complete new configuration. Existing agent assignments will stay the same.",
+      "dialog_replace_description": "To protect sensitive information, saved values aren't shown again. Saving replaces the whole entry: anything you don't enter here, such as headers, header helpers, tool allowlists, or timeouts, is removed. Existing agent assignments will stay the same.",
       "dialog_name_label": "Server name",
       "dialog_name_hint": "Used to identify this server at runtime. Use letters, numbers, hyphens, and underscores.",
       "dialog_name_required": "Enter a server name.",

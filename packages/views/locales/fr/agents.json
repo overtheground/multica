@@ -572,7 +572,7 @@
       "dialog_edit_title": "Modifier le serveur MCP",
       "dialog_edit_title_named": "Modifier la configuration de {{name}}",
       "dialog_replace_title": "Remplacer la configuration de {{name}}",
-      "dialog_replace_description": "Pour protéger les informations sensibles, les valeurs enregistrées ne sont plus affichées. Saisissez la nouvelle configuration complète. Les assignations aux agents resteront inchangées.",
+      "dialog_replace_description": "Pour protéger les informations sensibles, les valeurs enregistrées ne sont plus affichées. L'enregistrement remplace toute l'entrée : tout ce que vous ne saisissez pas ici, comme les en-têtes, les assistants d'en-têtes, les listes d'outils autorisés ou les délais, est supprimé. Les assignations aux agents resteront inchangées.",
       "dialog_name_label": "Nom du serveur",
       "dialog_name_hint": "Identifie ce serveur lors de l'exécution. Utilisez des lettres, des chiffres, des tirets et des traits de soulignement.",
       "dialog_name_required": "Saisissez un nom de serveur.",

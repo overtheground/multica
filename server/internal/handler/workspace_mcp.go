@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // mcpServerContainers are the two top-level keys an mcp_config document may
@@ -158,6 +159,12 @@ func parseMcpDocument(raw json.RawMessage) (map[string]json.RawMessage, map[stri
 // it is stored. Deliberately shallow — shape only, never the contents, which
 // are runtime-specific and carry secrets we do not want to inspect or echo
 // back in an error.
+//
+// It does require a launch target (a non-empty `command` or `url`), the same
+// rule the settings dialog enforces. An update REPLACES the stored entry and
+// the entry cannot be read back, so a target-less body — the blank
+// replacement template, or a partial "patch" such as only `enabled_tools` —
+// would silently turn a working server into one no runtime can start.
 func validateWorkspaceMcpServerEntry(raw json.RawMessage) error {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
@@ -172,7 +179,26 @@ func validateWorkspaceMcpServerEntry(raw json.RawMessage) error {
 	if len(entry) == 0 {
 		return errors.New("config must not be empty")
 	}
+	if !hasMcpLaunchTarget(entry) {
+		return errors.New("config must include a command or url; it replaces the whole stored entry")
+	}
 	return nil
+}
+
+// hasMcpLaunchTarget reports whether an entry names something to start or
+// connect to: a non-empty `url` string, or a `command` given as a non-empty
+// string or a non-empty array (the OpenCode `local` form).
+func hasMcpLaunchTarget(entry map[string]json.RawMessage) bool {
+	var url string
+	if json.Unmarshal(entry["url"], &url) == nil && strings.TrimSpace(url) != "" {
+		return true
+	}
+	var command string
+	if json.Unmarshal(entry["command"], &command) == nil && strings.TrimSpace(command) != "" {
+		return true
+	}
+	var argv []json.RawMessage
+	return json.Unmarshal(entry["command"], &argv) == nil && len(argv) > 0
 }
 
 // validateWorkspaceMcpServerName checks a server name. The name is what the
