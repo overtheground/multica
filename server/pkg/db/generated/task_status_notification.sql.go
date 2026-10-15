@@ -549,22 +549,6 @@ func (q *Queries) GetChannelUserBindingForMemberOnInstallation(ctx context.Conte
 	return i, err
 }
 
-const getIssueStatusCategory = `-- name: GetIssueStatusCategory :one
-SELECT task_status_notification_category($1::uuid, $2::text)::text AS category
-`
-
-type GetIssueStatusCategoryParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	StatusKey   string      `json:"status_key"`
-}
-
-func (q *Queries) GetIssueStatusCategory(ctx context.Context, arg GetIssueStatusCategoryParams) (string, error) {
-	row := q.db.QueryRow(ctx, getIssueStatusCategory, arg.WorkspaceID, arg.StatusKey)
-	var category string
-	err := row.Scan(&category)
-	return category, err
-}
-
 const getLatestAgentCommentForTask = `-- name: GetLatestAgentCommentForTask :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids FROM comment
 WHERE issue_id = $1
@@ -797,6 +781,25 @@ func (q *Queries) GetTaskStatusNotificationForComposeTask(ctx context.Context, i
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getTaskStatusNotificationResultStatus = `-- name: GetTaskStatusNotificationResultStatus :one
+SELECT task_status_notification_result_status($1::uuid, $2::text)::text AS result_status
+`
+
+type GetTaskStatusNotificationResultStatusParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	StatusKey   string      `json:"status_key"`
+}
+
+// The status key an issue's status counts as for notifications: built-ins are
+// themselves, custom done/closed statuses are done/cancelled, other custom
+// statuses stay their own key (migration 582).
+func (q *Queries) GetTaskStatusNotificationResultStatus(ctx context.Context, arg GetTaskStatusNotificationResultStatusParams) (string, error) {
+	row := q.db.QueryRow(ctx, getTaskStatusNotificationResultStatus, arg.WorkspaceID, arg.StatusKey)
+	var result_status string
+	err := row.Scan(&result_status)
+	return result_status, err
 }
 
 const getTaskStatusNotificationSubscription = `-- name: GetTaskStatusNotificationSubscription :one

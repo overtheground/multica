@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -130,6 +131,12 @@ func newTSNEnv(t *testing.T) *tsnEnv {
 	base.Member(t, workspaceID, userID, "owner")
 	base.Member(t, workspaceID, otherUserID, "member")
 	fx := testutil.New(testPool, workspaceID, userID)
+	// Seed the status catalog as workspace creation does. Without it every
+	// key falls back to itself and in_review/blocked never meet their real
+	// lifecycle category 'started' (MUL-19).
+	if err := issuestatus.Ensure(ctx, db.New(testPool), parseUUID(workspaceID)); err != nil {
+		t.Fatalf("seed status catalog: %v", err)
+	}
 
 	e := &tsnEnv{
 		t: t, ctx: ctx, fx: fx, q: db.New(testPool),
@@ -180,6 +187,7 @@ func newTSNEnv(t *testing.T) *tsnEnv {
 			`DELETE FROM comment WHERE workspace_id = $1`,
 			`DELETE FROM chat_session WHERE workspace_id = $1`,
 			`DELETE FROM issue WHERE workspace_id = $1`,
+			`DELETE FROM issue_status WHERE workspace_id = $1`,
 		} {
 			testPool.Exec(bg, stmt, workspaceID)
 		}
@@ -1286,5 +1294,83 @@ func TestTaskStatusNotificationInReviewAfterDeliveredDone(t *testing.T) {
 		if notes := e.notifications(id); len(notes) != 1 || notes[0].State != service.TaskStatusNotificationComposing {
 			t.Fatalf("in_review result %d notifications = %+v, want one composing", i, notes)
 		}
+	}
+}
+
+// TestTaskStatusNotificationJudgesResultStatusNotCategory: the catalog files
+// in_progress, in_review and blocked under one lifecycle category, 'started'.
+// A run ending in in_review or blocked is a result; one ending in in_progress
+// is not. A custom status counts only through its terminal category: in
+// 'done' it is a done result, in 'started' it is never one (MUL-19).
+func TestTaskStatusNotificationJudgesResultStatusNotCategory(t *testing.T) {
+	e := newTSNEnv(t)
+	e.openChat()
+	e.mustSubscribe()
+	for _, key := range []string{"in_progress", "in_review", "blocked"} {
+		var category string
+		e.fx.QueryRow(t, `SELECT category FROM issue_status WHERE workspace_id = $1 AND key = $2`, e.workspaceID, key).Scan(&category)
+		if category != "started" {
+			t.Fatalf("catalog category of %s = %q, want started", key, category)
+		}
+	}
+	for _, custom := range [][2]string{{"qa_check", "started"}, {"shipped", "done"}} {
+		e.fx.Exec(t, `INSERT INTO issue_status (workspace_id, key, name, category, color) VALUES ($1, $2, $2, $3, '#888888')`,
+			e.workspaceID, custom[0], custom[1])
+	}
+
+	cases := []struct{ status, outcome, eventResult string }{
+		{"in_review", "notified", "in_review"},
+		{"blocked", "notified", "blocked"},
+		{"done", "notified", "done"},
+		{"shipped", "notified", "done"},
+		{"in_progress", "suppressed:not_result_status", "in_progress"},
+		{"qa_check", "suppressed:not_result_status", "qa_check"},
+	}
+	ids := map[string]string{}
+	for _, c := range cases {
+		ids[c.status] = e.fx.Issue(t, "result "+c.status, testutil.Cols{"status": "todo"})
+		e.finishIssueRun(ids[c.status], c.status, "run ended in "+c.status)
+	}
+	e.tick()
+	for _, c := range cases {
+		got := e.eventOutcomes(ids[c.status])
+		if len(got) == 0 || got[len(got)-1] != c.outcome {
+			t.Errorf("%s: event outcomes = %v, want last %q", c.status, got, c.outcome)
+		}
+		var stored string
+		e.fx.QueryRow(t, `SELECT issue_category FROM task_status_notification_event WHERE issue_id = $1 AND source = 'task'`, ids[c.status]).Scan(&stored)
+		if stored != c.eventResult {
+			t.Errorf("%s: captured result status = %q, want %q", c.status, stored, c.eventResult)
+		}
+		notes := e.notifications(ids[c.status])
+		if want := c.outcome == "notified"; want != (len(notes) == 1 && notes[0].State == service.TaskStatusNotificationComposing) {
+			t.Errorf("%s: notifications = %+v, want composing=%t", c.status, notes, want)
+		}
+	}
+
+	// The compose input names the custom key and the result it counts as.
+	var input string
+	e.fx.QueryRow(t, `
+		SELECT m.content FROM chat_message m
+		JOIN task_status_notification n ON n.input_message_id = m.id
+		WHERE n.issue_id = $1`, ids["shipped"]).Scan(&input)
+	if !strings.Contains(input, "Status now: shipped (done)") {
+		t.Fatalf("custom done input lacks its result status:\n%s", input)
+	}
+
+	// A subscription to done alone hears custom done statuses, not in_review.
+	if w := e.subscribe(map[string]any{"agent_id": e.mikaID, "enabled": true, "statuses": []string{"done"}}); w.Code != http.StatusOK {
+		t.Fatalf("narrow subscription: %d %s", w.Code, w.Body.String())
+	}
+	review := e.fx.Issue(t, "review only", testutil.Cols{"status": "todo"})
+	shipped := e.fx.Issue(t, "shipped again", testutil.Cols{"status": "todo"})
+	e.finishIssueRun(review, "in_review", "ready")
+	e.finishIssueRun(shipped, "shipped", "shipped")
+	e.tick()
+	if got := e.eventOutcomes(review); got[len(got)-1] != "suppressed:no_matching_subscription" {
+		t.Fatalf("in_review under a done-only subscription = %v", got)
+	}
+	if got := e.eventOutcomes(shipped); got[len(got)-1] != "notified" {
+		t.Fatalf("custom done under a done-only subscription = %v", got)
 	}
 }

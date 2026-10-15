@@ -323,8 +323,11 @@ ORDER BY chunk_index;
 -- name: GetTaskStatusNotification :one
 SELECT * FROM task_status_notification WHERE id = @id;
 
--- name: GetIssueStatusCategory :one
-SELECT task_status_notification_category(@workspace_id::uuid, @status_key::text)::text AS category;
+-- name: GetTaskStatusNotificationResultStatus :one
+-- The status key an issue's status counts as for notifications: built-ins are
+-- themselves, custom done/closed statuses are done/cancelled, other custom
+-- statuses stay their own key (migration 582).
+SELECT task_status_notification_result_status(@workspace_id::uuid, @status_key::text)::text AS result_status;
 
 -- name: CreateChannelTaskDeliveryForNotification :one
 -- A notification turn speaks first: it answers no inbound message, so unlike

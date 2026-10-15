@@ -23,7 +23,7 @@ The flow:
 
 | Step | Where |
 | --- | --- |
-| Capture: triggers write durable events in the same transaction as the change | `server/migrations/573_task_status_notification.*` |
+| Capture: triggers write durable events in the same transaction as the change | `server/migrations/573_task_status_notification.*`, result status: `582_task_status_notification_result_status.*` |
 | Indexes, one per migration | `server/migrations/574`–`581` |
 | Decide: settle window, staleness, dedup, rate limit, route checks | `server/internal/service/task_status_notification.go` |
 | Compose: a hidden event input plus a chat turn of the agent | same file, `EnqueueTaskStatusNotificationTurn` |
@@ -73,7 +73,7 @@ Tests:
    ```
 
 2. Migration numbers: upstream keeps adding `server/migrations/NNN_*`. If
-   upstream reuses numbers 573–581, rename this fork's files to numbers after
+   upstream reuses numbers 573–582, rename this fork's files to numbers after
    upstream's last migration. Keep each concurrent index in its own file, and
    update the keys in `concurrentIndexCleanups` in `server/cmd/migrate/main.go`.
    Never renumber migrations a deployed database has already applied: check

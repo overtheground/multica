@@ -55,8 +55,10 @@ import (
 // package.
 const TaskStatusNotificationChannelType = "telegram"
 
-// TaskStatusNotificationStatuses are the result categories a subscription may
-// select. Everything else (todo, in_progress, backlog, cancelled) is a
+// TaskStatusNotificationStatuses are the result statuses a subscription may
+// select. They are status keys, not catalog categories: in_review and blocked
+// share the lifecycle category 'started' with in_progress. Everything else
+// (todo, in_progress, backlog, cancelled, custom non-done statuses) is a
 // transition without a result and is never notified.
 var TaskStatusNotificationStatuses = []string{"blocked", "in_review", "done"}
 
@@ -549,7 +551,7 @@ type taskStatusFacts struct {
 	identifier string
 	title      string
 	status     string
-	category   string
+	result     string // result status the issue counts as (custom done → done)
 	link       string
 	actor      string
 	runStatus  string
@@ -573,14 +575,17 @@ func (n *TaskStatusNotifier) processEvent(ctx context.Context, ev db.TaskStatusN
 	if issue.WorkspaceID != ev.WorkspaceID {
 		return "suppressed:workspace_mismatch", nil
 	}
-	category, err := q.GetIssueStatusCategory(ctx, db.GetIssueStatusCategoryParams{
+	// The result status, not the catalog category: in_progress, in_review and
+	// blocked share the lifecycle category 'started'.
+	result, err := q.GetTaskStatusNotificationResultStatus(ctx, db.GetTaskStatusNotificationResultStatusParams{
 		WorkspaceID: issue.WorkspaceID, StatusKey: issue.Status,
 	})
 	if err != nil {
-		return "", fmt.Errorf("resolve status category: %w", err)
+		return "", fmt.Errorf("resolve result status: %w", err)
 	}
-	if !slices.Contains(TaskStatusNotificationStatuses, category) {
-		// Includes cancelled: a closed-without-result issue is never news.
+	if !slices.Contains(TaskStatusNotificationStatuses, result) {
+		// Includes in_progress, cancelled and custom statuses outside done:
+		// none of them is a result.
 		return "suppressed:not_result_status", nil
 	}
 	if issue.Status != ev.IssueStatus {
@@ -606,7 +611,7 @@ func (n *TaskStatusNotifier) processEvent(ctx context.Context, ev db.TaskStatusN
 		return n.deferEvent(ctx, ev, taskStatusNotificationRecheck)
 	}
 
-	facts := taskStatusFacts{title: neutralizeQuoteTags(issue.Title), status: issue.Status, category: category}
+	facts := taskStatusFacts{title: neutralizeQuoteTags(issue.Title), status: issue.Status, result: result}
 	ws, err := q.GetWorkspace(ctx, issue.WorkspaceID)
 	if err != nil {
 		return "", fmt.Errorf("load workspace: %w", err)
@@ -687,7 +692,7 @@ func (n *TaskStatusNotifier) processEvent(ctx context.Context, ev db.TaskStatusN
 // cover this issue at all.
 func (n *TaskStatusNotifier) notifySubscriber(ctx context.Context, ev db.TaskStatusNotificationEvent, issue db.Issue, sub db.TaskStatusNotificationSubscription, facts taskStatusFacts, dedupKey string) (string, error) {
 	q := n.Queries
-	if !slices.Contains(sub.Statuses, facts.category) {
+	if !slices.Contains(sub.Statuses, facts.result) {
 		return "", nil
 	}
 	if len(sub.ProjectIds) > 0 && !slices.Contains(sub.ProjectIds, issue.ProjectID) {
@@ -804,8 +809,8 @@ func buildTaskStatusEventInput(f taskStatusFacts, memberName string) string {
 	b.WriteString("[Multica task status event — sent by Multica, not written by the member]\n\n")
 	fmt.Fprintf(&b, "Issue: %s — %s\n", f.identifier, f.title)
 	fmt.Fprintf(&b, "Status now: %s", f.status)
-	if f.category != f.status {
-		fmt.Fprintf(&b, " (%s)", f.category)
+	if f.result != f.status {
+		fmt.Fprintf(&b, " (%s)", f.result)
 	}
 	b.WriteString("\n")
 	if f.runStatus != "" {
