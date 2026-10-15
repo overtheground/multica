@@ -237,7 +237,15 @@ func TestValidateWorkspaceMcpServerEntry(t *testing.T) {
 	}{
 		{name: "stdio entry", raw: `{"command":"npx","args":["-y","server"]}`},
 		{name: "http entry", raw: `{"type":"http","url":"https://mcp.example"}`},
+		{name: "opencode local entry", raw: `{"type":"local","command":["npx","-y","server"]}`},
 		{name: "empty object", raw: `{}`, wantErr: true},
+		// An update replaces the whole entry, so neither the blank replacement
+		// template nor a partial patch may overwrite a working server.
+		{name: "blank http template", raw: `{"type":"http","url":""}`, wantErr: true},
+		{name: "tool allowlist only", raw: `{"enabled_tools":["add-projects"]}`, wantErr: true},
+		{name: "blank command", raw: `{"command":"  "}`, wantErr: true},
+		{name: "empty command array", raw: `{"type":"local","command":[]}`, wantErr: true},
+		{name: "non-string url", raw: `{"url":true}`, wantErr: true},
 		{name: "array", raw: `[]`, wantErr: true},
 		{name: "string", raw: `"nope"`, wantErr: true},
 		{name: "null", raw: `null`, wantErr: true},

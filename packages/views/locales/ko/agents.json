@@ -466,7 +466,7 @@
       "dialog_edit_title": "MCP Server 편집",
       "dialog_edit_title_named": "{{name}} 설정 편집",
       "dialog_replace_title": "{{name}} 설정 교체",
-      "dialog_replace_description": "민감한 정보를 보호하기 위해 저장된 내용은 다시 표시되지 않습니다. 새 설정을 모두 입력하세요. 기존 에이전트 할당은 그대로 유지됩니다.",
+      "dialog_replace_description": "민감한 정보를 보호하기 위해 저장된 내용은 다시 표시되지 않습니다. 저장하면 설정 전체가 교체되며, 여기에 입력하지 않은 항목(헤더, 헤더 헬퍼, 도구 허용 목록, 타임아웃 등)은 삭제됩니다. 기존 에이전트 할당은 그대로 유지됩니다.",
       "dialog_name_label": "Server 이름",
       "dialog_name_hint": "Runtime에서 이 Server를 식별하는 이름입니다. 문자, 숫자, 하이픈, 밑줄을 사용할 수 있습니다.",
       "dialog_name_required": "Server 이름을 입력하세요.",

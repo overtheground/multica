@@ -142,7 +142,11 @@ var workspaceMcpUpdateCmd = &cobra.Command{
 	Short: "Rename or replace a workspace MCP server (admin/owner only)",
 	Long: "Renames a server, replaces its configuration, or both. Agents keep " +
 		"their assignment across a rename because assignments key off the server " +
-		"id, not its name.",
+		"id, not its name.\n\n" +
+		"A new configuration REPLACES the whole stored entry; it is not merged. " +
+		"Saved entries are write-only and cannot be read back, so pass the " +
+		"complete entry from your own source file: any field you leave out " +
+		"(headers, http_headers_helper, enabled_tools, timeouts) is removed.",
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runWorkspaceMcpUpdate,
 }

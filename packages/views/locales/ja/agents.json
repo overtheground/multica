@@ -458,7 +458,7 @@
       "dialog_edit_title": "MCP Server を編集",
       "dialog_edit_title_named": "{{name}} の設定を編集",
       "dialog_replace_title": "{{name}} の設定を置き換え",
-      "dialog_replace_description": "機密情報を保護するため、保存済みの内容は再表示されません。新しい設定をすべて入力してください。既存のエージェントへの割り当ては変わりません。",
+      "dialog_replace_description": "機密情報を保護するため、保存済みの内容は再表示されません。保存すると設定全体が置き換わり、ここに入力しなかった項目（ヘッダー、ヘッダーヘルパー、ツールの許可リスト、タイムアウトなど）は削除されます。既存のエージェントへの割り当ては変わりません。",
       "dialog_name_label": "Server 名",
       "dialog_name_hint": "Runtime でこの Server を識別する名前です。英数字、ハイフン、アンダースコアを使用できます。",
       "dialog_name_required": "Server 名を入力してください。",

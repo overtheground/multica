@@ -560,7 +560,7 @@
       "dialog_edit_title": "编辑 MCP Server",
       "dialog_edit_title_named": "编辑 {{name}} 的配置",
       "dialog_replace_title": "替换 {{name}} 的配置",
-      "dialog_replace_description": "为保护敏感信息，已保存的内容不会再次显示。请填写一份完整的新配置；替换后，现有的智能体分配不会改变。",
+      "dialog_replace_description": "为保护敏感信息，已保存的内容不会再次显示。保存会替换整条配置：未在此填写的内容（如请求头、请求头辅助程序、工具白名单、超时设置）都会被移除。现有的智能体分配不会改变。",
       "dialog_name_label": "名称",
       "dialog_name_hint": "可使用字母、数字、连字符和下划线。",
       "dialog_name_required": "请输入名称。",

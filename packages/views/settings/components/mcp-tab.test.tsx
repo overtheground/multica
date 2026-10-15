@@ -437,6 +437,43 @@ describe("McpTab", () => {
     );
   });
 
+  // The JSON tab of a replacement shows the blank form's shape, not the saved
+  // entry. Neither that blank nor a partial "patch" may replace the entry.
+  it("never replaces a saved entry with the blank template or a partial patch", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(
+      screen.getAllByRole("button", {
+        name: /^Replace configuration /,
+      })[0]!,
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Saving replaces the whole entry",
+    );
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    const json = screen.getByRole("textbox", { name: /JSON/ });
+    expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual({
+      type: "http",
+      url: "",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
+    expect(
+      screen.getByText("The server configuration must include a command or URL."),
+    ).toBeInTheDocument();
+
+    fireEvent.change(json, {
+      target: { value: '{"enabled_tools":["add-projects"]}' },
+    });
+    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
+
+    expect(
+      screen.getByText("The server configuration must include a command or URL."),
+    ).toBeInTheDocument();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
   it("keeps an in-progress replacement when the settings page rerenders", async () => {
     const user = userEvent.setup();
     const view = render(<McpTab />, { wrapper: Wrapper });
