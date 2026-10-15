@@ -77,4 +77,6 @@ BEGIN
     RETURN NULL;
 END $$;
 
-DROP FUNCTION IF EXISTS task_status_notification_category(UUID, TEXT);
+-- task_status_notification_category stays in place, unused by this build: a
+-- backend rolled back to the previous image still calls it, and keeping it
+-- makes that rollback an image swap with no schema step.
