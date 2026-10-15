@@ -87,6 +87,14 @@ describe("historyIndicesForMenu", () => {
 });
 
 describe("WindowToolbar history controls", () => {
+  it("places a reload control immediately after the sidebar toggle", () => {
+    render(<WindowToolbar />);
+    const toggle = screen.getByRole("button", { name: "Toggle sidebar" });
+    const reload = screen.getByRole("button", { name: "Reload page" });
+    expect(toggle.nextElementSibling).toBe(reload);
+    expect(reload).toHaveAttribute("title", "Reload page");
+  });
+
   it("left-aligns the controls past the traffic lights across the expanded sidebar", () => {
     render(<WindowToolbar />);
 
@@ -95,7 +103,7 @@ describe("WindowToolbar history controls", () => {
     expect(toolbar).toHaveStyle({
       paddingLeft: "88px",
       width:
-        "max(var(--sidebar-live-width, var(--sidebar-width)), 200px)",
+        "max(var(--sidebar-live-width, var(--sidebar-width)), 236px)",
     });
     expect(toolbar).toHaveAttribute("data-sidebar-resize-consumer");
     expect(toolbar).not.toHaveClass("transition-[width]");

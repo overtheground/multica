@@ -117,3 +117,9 @@ Tests:
    tables, functions and triggers, and have `down` files. To stop the
    feature without a deploy, disable every subscription: the triggers write
    nothing while none is enabled.
+
+## Local desktop refresh and MCP guard
+
+- Includes MUL-27 (`36400b5e8`): reject workspace MCP replacements without a command or URL, preserving existing connections.
+- Desktop toolbar adds Reload page immediately after the sidebar toggle. It reloads the renderer and clears its in-memory query cache; server-side agent runs continue. Unsaved form edits may be lost, as with a browser reload.
+- Based on `5e744988`, retaining notification migrations 573–583 unchanged.
