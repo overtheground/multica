@@ -87,9 +87,7 @@ import "./rich-content.css";
 export type RichContentDensity = "compact" | "document";
 export type RichContentPhase = "streaming" | "settled";
 
-// ---------------------------------------------------------------------------
 // Fence gate context
-// ---------------------------------------------------------------------------
 //
 // The closed-fence offsets travel by context rather than by rebuilding the
 // components map. The map must stay referentially stable: react-markdown
@@ -109,9 +107,7 @@ function useClosedFence(offset: number | undefined): ClosedFence | undefined {
   return offset == null ? undefined : closed.get(offset);
 }
 
-// ---------------------------------------------------------------------------
 // Mention / link renderers
-// ---------------------------------------------------------------------------
 
 /**
  * Issue mention chip. Navigation — plain click, modifier click, and the
@@ -356,9 +352,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   return plainLink;
 }
 
-// ---------------------------------------------------------------------------
 // Fenced code
-// ---------------------------------------------------------------------------
 
 function getTextContent(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
@@ -550,9 +544,7 @@ const REHYPE_PLUGINS = [
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export interface RichContentProps {
   content: string;

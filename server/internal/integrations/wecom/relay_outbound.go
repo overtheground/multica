@@ -1,56 +1,15 @@
 package wecom
 
-// relay_outbound.go — how a reply reaches the replica that can send it.
+// Relay completions to the replica holding the bot's WebSocket lease.
+// Redis claims keyed by turn deduplicate replay across restarts and replicas.
 //
-// WeCom is the one channel with no outbound REST path: every write goes over
-// the aibot WebSocket, and the WS lease means exactly one replica holds it.
-// chat:done, meanwhile, is published on the in-process events.Bus by whichever
-// replica served the daemon's POST /tasks/{id}/complete — a load-balancer
-// decision. Off-lease, outbound.go used to have nothing to do but drop the
-// reply (GH #7215, #6890; SELF_HOSTING.md states the resulting constraint).
+// Relay consumers run on the shard reader, so enqueue bounded work and return
+// without waiting for platform acknowledgements. Register before readers start;
+// Attach supplies the eventual handler while early frames wait in the queue.
 //
-// This routes it over the Redis Stream relay the repository already runs for
-// exactly this shape of problem: daemonws.RelayNotifier wakes a daemon
-// connected to another replica by publishing under ScopeDaemonRuntime, and
-// every node's XREAD loop hands the frame to whoever holds that connection.
-//
-// THREE THINGS THAT MECHANISM REQUIRES OF ITS CONSUMERS, and that a naive copy
-// of the daemon-wakeup shape does not satisfy:
-//
-//  1. It replays. A shard reader starts from (now - ReplayGrace), not "$", so
-//     events published while a pod was down are re-read — its own doc says
-//     "downstream consumers must be idempotent". A per-process seen-set is not
-//     idempotent across a restart, and does not span two replicas either. The
-//     claim therefore lives in Redis, keyed on the turn, with a lifetime that
-//     comfortably outlasts the replay window. Redis is not a new dependency
-//     here: it IS the transport. No Redis means no relay, which means no
-//     cross-replica delivery and nothing to deduplicate.
-//
-//  2. It calls the consumer SYNCHRONOUSLY on the shard read loop. The daemon
-//     wakeup's work there is a map lookup and a buffered write; ours is a
-//     network round trip that waits up to ackTimeout for the platform's
-//     verdict. Doing that inline would let one unhealthy bot stall browser
-//     realtime traffic, daemon wakeups, and every other bot on that shard. So
-//     DeliverWecomOutbound only hands the frame to a bounded queue and
-//     returns.
-//
-//  3. Its readers start early. Registration therefore has to be possible
-//     before the senders registry and the subscriber exist: this object is
-//     built and registered first, and Attach supplies the handler afterwards.
-//     Frames that arrive in between wait in the queue rather than being
-//     dropped against a nil field.
-//
-// ORDERING: every reply for one installation is carried by one queue and one
-// worker, in the order it arrived — INCLUDING across a re-offer. A frame that
-// has to be tried again does not go to the back of the queue; it parks at the
-// head of its own installation's line and everything behind it waits, because
-// two answers to the same person arriving in the wrong order is the defect
-// this ordering exists to prevent.
-//
-// Sharding is a CONCURRENCY bound, not an isolation guarantee: installations
-// are hashed onto RelayConfig.Shards queues, so two bots that collide on a
-// shard do wait behind each other. What the shard count buys is that one slow
-// bot cannot occupy every worker.
+// Preserve per-installation order across re-offers by retrying at the queue head.
+// Hashed shards bound concurrency, not isolation: colliding installations can
+// still wait behind each other.
 
 import (
 	"context"

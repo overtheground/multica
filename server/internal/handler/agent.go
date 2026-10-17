@@ -348,6 +348,15 @@ type TaskIssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// TaskProjectWorkflowData is the workflow of the project a task's issue
+// belongs to (MUL-7420), sent only when that workflow says more than the
+// runtime's status rules: a named workflow, or a Default that hands off.
+// Brief is the server-rendered text (issueworkflow.Brief); the daemon puts it
+// in the per-turn prompt, never in the cached runtime brief.
+type TaskProjectWorkflowData struct {
+	Brief string `json:"brief"`
+}
+
 // TaskCancellationActor is the point-in-time actor snapshot attached to a
 // cancelled run. Type stays open for forward compatibility; current producers
 // emit member, agent, or system.
@@ -397,31 +406,34 @@ type AgentTaskResponse struct {
 	// IssueStatusesOmitted is how many active custom statuses were dropped by
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
-	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
-	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status               string                `json:"status"`
-	Priority             int32                 `json:"priority"`
-	DispatchedAt         *string               `json:"dispatched_at"`
-	StartedAt            *string               `json:"started_at"`
-	CompletedAt          *string               `json:"completed_at"`
-	Result               any                   `json:"result"`
-	Error                *string               `json:"error"`
-	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt              int32                 `json:"attempt"`
-	MaxAttempts          int32                 `json:"max_attempts"`
-	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent                *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos                []RepoData            `json:"repos,omitempty"`
-	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt            string                `json:"created_at"`
-	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	IssueStatusesOmitted int `json:"issue_statuses_omitted,omitempty"`
+	// ProjectWorkflow is the issue's project workflow, when it has one other
+	// than the Default (MUL-7420). Absent keeps the brief unchanged.
+	ProjectWorkflow    *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
+	ThreadName         string                   `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status             string                   `json:"status"`
+	Priority           int32                    `json:"priority"`
+	DispatchedAt       *string                  `json:"dispatched_at"`
+	StartedAt          *string                  `json:"started_at"`
+	CompletedAt        *string                  `json:"completed_at"`
+	Result             any                      `json:"result"`
+	Error              *string                  `json:"error"`
+	FailureReason      string                   `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt            int32                    `json:"attempt"`
+	MaxAttempts        int32                    `json:"max_attempts"`
+	ParentTaskID       *string                  `json:"parent_task_id,omitempty"`
+	IsLeaderTask       bool                     `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved bool                     `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent              *TaskAgentData           `json:"agent,omitempty"`
+	ConnectedApps      []ConnectedAppData       `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos              []RepoData               `json:"repos,omitempty"`
+	ProjectID          string                   `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle       string                   `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                   `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources   []ProjectResourceData    `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt          string                   `json:"created_at"`
+	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
