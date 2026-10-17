@@ -14,9 +14,22 @@ func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
 	files := migrationFilesForLint(t, "*.up.sql")
 
 	// Migrations through 128 contain historical duplicate numeric prefixes.
-	// From 129 onward, keep the numeric sequence unique so release tooling and
-	// operators can identify one schema change unambiguously by its number.
+	// The deployed fork and v0.6.3 independently allocated 573–582. Preserve
+	// their full migration names to avoid replaying deployed DDL (see FORK.md).
+	// Only these exact historical pairs may share a number; future additions
+	// must retain unique numeric prefixes.
 	const firstUniqueMigrationNumber = 129
+	deployedForkPairs := map[string]string{
+		"573_issue_workflow":                            "573_task_status_notification",
+		"574_issue_workflow_pkey_index":                 "574_task_status_notification_subscription_idx",
+		"575_issue_workflow_primary_key":                "575_task_status_notification_event_pending_idx",
+		"576_issue_workflow_workspace_name_index":       "576_task_status_notification_event_issue_idx",
+		"577_project_workflow_id":                       "577_task_status_notification_dedup_idx",
+		"578_agent_task_workflow_step":                  "578_task_status_notification_outbox_idx",
+		"579_task_status_notification_compose_task_idx": "579_wakeup_skip_handed_to_agent",
+		"581_issue_workflow_is_default":                 "581_task_status_notification_session_idx",
+		"582_issue_workflow_default_index":              "582_task_status_notification_message_idx",
+	}
 	stemByNumber := make(map[int]string)
 	for _, file := range files {
 		stem, _, ok := splitMigrationFilename(filepath.Base(file))
@@ -32,6 +45,9 @@ func TestMigrationNumericPrefixesAreUnique(t *testing.T) {
 			continue
 		}
 		if previous, exists := stemByNumber[number]; exists {
+			if deployedForkPairs[previous] == stem {
+				continue
+			}
 			t.Errorf("migrations %s and %s share numeric prefix %s", previous, stem, prefix)
 			continue
 		}

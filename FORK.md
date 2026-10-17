@@ -123,3 +123,9 @@ Tests:
 - Includes MUL-27 (`36400b5e8`): reject workspace MCP replacements without a command or URL, preserving existing connections.
 - Desktop toolbar adds Reload page immediately after the sidebar toggle. It reloads the renderer and clears its in-memory query cache; server-side agent runs continue. Unsaved form edits may be lost, as with a browser reload.
 - Based on `5e744988`, retaining notification migrations 573–583 unchanged.
+
+## v0.6.3 migration identity
+
+The upstream uniqueness lint permits only the nine exact historical filename pairs
+from the independent fork/upstream 573–582 allocations. All SQL files remain
+unchanged; new collisions still fail. Never renumber either side after deployment.
