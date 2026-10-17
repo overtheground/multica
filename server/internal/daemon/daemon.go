@@ -977,47 +977,16 @@ type healedAgent struct {
 	version string
 }
 
-// resolveAgentEntry returns entry with a usable executable path plus the CLI
-// version that corresponds to that path. It resolves retargetable Windows
-// installer junctions per launch and self-heals vanished pinned paths on other
-// platforms (MUL-4486).
+// resolveAgentEntry returns a usable executable and its matching version.
+// Resolve retargetable Windows junctions per launch. Prefer an existing healed
+// path over a reappearing old path; otherwise keep a live pinned path even when
+// PATH changes, so task launches cannot be redirected incidentally.
 //
-// The daemon pins each agent's discovered entry point at startup so a later
-// PATH change cannot redirect a task launch. POSIX discovery also resolves
-// symlinks to a concrete path. But a version manager
-// (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
-// directory that pinned path points into and repoints the stable command name
-// at the new version — leaving the daemon holding a path that no longer exists
-// until it restarts. Every consumer of entry.Path (task launch, model listing,
-// version detection at registration) then hard-fails with "executable not
-// found".
-//
-// The returned version always matches the returned path, so callers key
-// version-sensitive policy (e.g. the Codex sandbox) off it directly rather than
-// re-reading the shared version cache, which a concurrent heal could still be
-// updating.
-//
-// Behaviour:
-//   - A Windows stable entry point -> its final target is verified and returned
-//     with the detected version; a retarget publishes the new pair atomically.
-//   - A previous self-heal that is still live -> returned with its paired
-//     version. This is checked first so that once we've re-resolved to a new
-//     binary, a reappearing stale path (a downgrade / reinstall recreating the
-//     old versioned directory) cannot re-pair that old binary with the healed
-//     version — a mismatched {old path, new version} (MUL-4486 review).
-//   - Otherwise, pinned Path still present -> returned unchanged, paired with
-//     its registration-detected version. The anti-redirect guarantee holds for
-//     the normal (never-healed) case: a live pinned binary is never
-//     second-guessed even if PATH now points elsewhere.
-//   - Pinned Path gone and no live heal -> re-resolve entry.Command once
-//     (preserving the ~/.multica/hooks exclusion and the login-shell fallback).
-//     Before adopting the re-resolved binary it is version-detected and run
-//     through the same minimum-version gate registration applies. This
-//     reproduces exactly what a daemon restart would resolve, so it is no less
-//     safe than the documented restart workaround — only automatic.
-//   - Re-resolution fails, the candidate can't be version-detected, or it is
-//     below the minimum supported version -> entry is returned unchanged so the
-//     candidate is never launched and the downstream error still surfaces.
+// If the pinned path vanished, rediscover the command with the normal hooks
+// exclusion and login-shell fallback. Adopt only a version-detectable candidate
+// meeting the registration minimum. Failed recovery returns the original entry
+// so the launch error remains visible. Callers use the paired version rather
+// than a shared cache another recovery may be updating.
 func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
 	resolved, version, _ := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	return resolved, version
@@ -1480,58 +1449,15 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 	return len(ws.runtimeIDs) == 0
 }
 
-// reregisterWorkspaceAfterRuntimeGone calls registerRuntimesForWorkspace and
-// updates the existing workspaceState in place. The register response is
-// authoritative for this workspace's runtime set — every configured provider
-// is included, with UpsertAgentRuntime returning the same row ID for surviving
-// providers and a fresh ID for any that were deleted server-side. Replacing
-// (rather than appending) is required: a partial recovery, where only one
-// runtime in a multi-provider workspace was deleted, would otherwise produce
-// duplicates for every provider that wasn't deleted.
+// applyRegisterResponseInPlace reconciles the authoritative runtime response
+// without replacing workspaceState, whose mutexes are shared with other callers.
+// Return current IDs, dropped IDs to deregister, and false if the workspace has
+// been forgotten while registration was in flight.
 //
-// The workspaceState pointer is NEVER replaced (see syncWorkspacesFromAPI's
-// invariant about repoRefreshMu). Only fields are mutated.
-// applyRegisterResponseInPlace folds a fresh /api/daemon/register response
-// back into the workspaceState and runtimeIndex without replacing the
-// workspaceState pointer (see syncWorkspacesFromAPI's invariant about
-// repoRefreshMu). It is the shared converger used by both the runtime_gone
-// recovery and the profile-drift refresh; the two callers differ only in
-// follow-up side effects (RecoverOrphans / Deregister), so those stay at the
-// call site.
-//
-// Returns:
-//   - newIDs:     the runtime IDs the server returned in this response, in
-//     the order they were returned. These are the daemon's authoritative
-//     current runtime set after the call.
-//   - droppedIDs: runtime IDs that were tracked before this call but did
-//     NOT survive the response. Callers Deregister these so the server marks
-//     them offline immediately instead of waiting on the 150 s
-//     stale-heartbeat sweep. On the runtime_gone path the triggering row was
-//     already deleted server-side (and pruned locally before the register),
-//     but a SIBLING dropped here — e.g. a provider removed from the daemon's
-//     config, or a disabled profile — still has a live server row that must be
-//     deregistered.
-//   - ok:         false when the workspace was forgotten between the
-//     register call and this apply (e.g. the user left the workspace and
-//     syncWorkspacesFromAPI removed it). The caller must abort silently in
-//     that case — there is no state left to update.
-//
-// profileSig is the digest captured during the register; an empty value is
-// the explicit "fetch failed, keep the previous signature" sentinel from
-// appendProfileRuntimes.
-//
-// preserveProviders lists the built-in providers this response is not
-// authoritative about, keyed by provider — see preserveProvidersFromProbe. Their
-// entries are absent from the payload, and therefore from the response, either
-// because the probe failed (transient) or because they were confirmed
-// below-minimum by a path with no authority to demote. Either way, dropping
-// their rows here would take a runtime offline outside the one path that does it
-// safely, so their existing built-in runtime rows are kept instead.
-//
-// A provider already under a demotion hold is a different case and is still
-// rejected below: that verdict was reached by demoteBelowMinimumRuntimes, which
-// removed the rows under the claim barrier, and this response merely predates
-// it.
+// An empty profileSig keeps the previous signature. preserveProviders retains
+// built-in rows omitted by failed or non-authoritative probes; a confirmed demotion
+// still wins over a response sent before the demotion. Callers own recovery and
+// deregistration side effects.
 func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string, preserveProviders map[string]string) (newIDs, droppedIDs []string, ok bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -2763,49 +2689,14 @@ probeLoop:
 	return "", reason, builtinProbeUnavailable
 }
 
-// detectBuiltinRuntimes version-detects every configured built-in agent CLI and
-// returns a registration entry for each one that resolves and clears the
-// minimum-version gate. Probes run concurrently, bounded by
-// runtimeVersionProbeConcurrency.
+// detectBuiltinRuntimes probes configured CLIs with bounded concurrency and
+// returns registration entries that resolve and meet minimum versions. Reuse a
+// single probe result when registering several workspaces.
 //
-// The previous implementation probed serially, so total latency was the SUM of
-// every CLI's `--version` call. On an onboarding host with several coding tools
-// installed that stacked into many seconds of dead time before the daemon could
-// register — long enough that the desktop runtime step timed out into its empty
-// "no runtime found" state while the probes were still running (MUL-5119).
-// Fanning the probes out makes total latency track the SLOWEST single probe
-// instead of their sum, so a freshly-created workspace lights up its runtimes
-// well inside the UI's scanning window.
-//
-// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — nothing is cached on the Daemon, so an in-place CLI
-// upgrade is still reported with its current version. A provider whose version
-// stays undetectable across probeBuiltinRuntime's bounded attempts, or which is
-// below the minimum supported version, is logged and skipped, exactly as the
-// serial loop did.
-//
-// The result describes the machine, not a workspace, so a caller registering a
-// batch of workspaces at once calls this ONCE and passes the payload to
-// registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
-//
-// The second return value is THIS round's confirmed verdicts, provider to the
-// evidence against it. It is returned rather than read back
-// out of skippedAgents because that pair is a diagnostic snapshot of whichever
-// round published last: four different goroutines call this (the discovery
-// loop, the workspace sync, a runtime_gone re-register, a profile drift
-// refresh), so a caller acting on the shared copy can act on someone else's
-// probe — and demoting a runtime is not a decision to make on another round's
-// evidence.
-//
-// The third return value is THIS round's unavailable providers (version could
-// not be read), provider to reason. Callers that treat a register response as
-// AUTHORITATIVE for a workspace's whole runtime set (the runtime_gone recovery
-// and the profile drift refresh, via applyRegisterResponseInPlace) must
-// preserve these providers' existing runtimes: they are absent from the
-// payload because the probe failed, which is transient — tearing a working
-// runtime down over it is exactly what the unavailable/below-minimum verdict
-// split exists to prevent. demotableBuiltinProbeVerdict is the list of verdicts
-// that may demote.
+// Return this round's confirmed demotion evidence and unavailable-provider reasons
+// separately. Shared diagnostic snapshots may belong to another concurrent probe.
+// Authoritative reconciliation must preserve unavailable providers' existing rows;
+// a transient probe failure is not evidence that a runtime should be demoted.
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string, map[string]runtimeVerdict, map[string]string) {
 	type detected struct {
 		name    string

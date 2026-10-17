@@ -15,6 +15,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -109,26 +110,29 @@ func TestTryDeliverInbox_WaitIsBoundedByTheCallersDeadline(t *testing.T) {
 // return, leaving the cost at exactly one window rather than two.
 func TestTryDeliverInbox_FallbackAttemptDoesNotWaitAgain(t *testing.T) {
 	t.Parallel()
-	// Small enough to keep the test quick, big enough that one window is
-	// several polls and two windows would be unmistakable.
-	rig := newInboxWaitRig(t, 400*time.Millisecond)
+	// Virtual time keeps CI scheduling delays from consuming the acceptance
+	// poll's timeout cushion while still exercising the real relay and timers.
+	synctest.Test(t, func(t *testing.T) {
+		const window = 400 * time.Millisecond
+		rig := newInboxWaitRig(t, window)
 
-	got, elapsed := rig.deliver(context.Background(), agentInboxItem("new_comment", inboxWaitAgentID))
-	if !got {
-		t.Error("tryDeliverInbox = false; the fallback publish was accepted and had no route behind it")
-	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("the push took %v for a 400ms window; the fallback must not wait again", elapsed)
-	}
-	// One window at step = window/8 is about nine polls; two would be about
-	// eighteen. The bound sits between them.
-	if n := rig.dedupe.claimStateCount(); n > 12 {
-		t.Errorf("the claim was polled %d times; the fallback attempt paid a second acceptance window", n)
-	}
-	if n := rig.relay.publishedTo(inboxWaitFallbackInst); n != 1 {
-		t.Errorf("the recipient-wide bot was offered %d frames, want 1", n)
-	}
-	if n := rig.relay.publishedTo(inboxWaitAgentInst); n != 1 {
-		t.Errorf("the acting agent's bot was offered %d frames, want 1", n)
-	}
+		got, elapsed := rig.deliver(context.Background(), agentInboxItem("new_comment", inboxWaitAgentID))
+		if !got {
+			t.Error("tryDeliverInbox = false; the fallback publish was accepted and had no route behind it")
+		}
+		if elapsed != window {
+			t.Fatalf("the push took %v, want exactly one acceptance window (%v)", elapsed, window)
+		}
+		// One window at step = window/8 is about nine polls; two would be about
+		// eighteen. The bound sits between them.
+		if n := rig.dedupe.claimStateCount(); n > 12 {
+			t.Errorf("the claim was polled %d times; the fallback attempt paid a second acceptance window", n)
+		}
+		if n := rig.relay.publishedTo(inboxWaitFallbackInst); n != 1 {
+			t.Errorf("the recipient-wide bot was offered %d frames, want 1", n)
+		}
+		if n := rig.relay.publishedTo(inboxWaitAgentInst); n != 1 {
+			t.Errorf("the acting agent's bot was offered %d frames, want 1", n)
+		}
+	})
 }

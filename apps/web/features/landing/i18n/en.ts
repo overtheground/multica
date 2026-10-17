@@ -523,6 +523,30 @@ export function createEnDict(
     },
     entries: [
       {
+        version: "0.6.3",
+        date: "2026-10-16",
+        title: "Per-run cost details, shorter onboarding, revoked access for former members, and steadier runs",
+        changes: [],
+        features: [
+          "The execution log shows a cost bar for each run, along with its tokens, time, and model.",
+          "Run details compare runs by cost, tokens, or agent time, with a cumulative view one click away.",
+          "Expand any run to see its token and cost breakdown.",
+        ],
+        improvements: [
+          "Skipping runtime setup during onboarding opens the install guide Issue right away.",
+        ],
+        fixes: [
+          "Members who leave or are removed from a workspace stop getting its notifications and live updates.",
+          "The agent builder fills in the configuration even when its draft comes back slightly malformed.",
+          "The agent builder's retry warning stays gone once you close it or edit the form yourself.",
+          "Tasks picked up but never delivered to your computer go back to the queue instead of getting stuck.",
+          "Resuming in a local folder no longer replays committed changes as drafts, and keeps your other drafts.",
+          "Cache cleanup no longer deletes tracked folders like .next, or Git checkouts inside them.",
+          "Claude Sonnet 5.5 and Haiku 5.5 runs now show an estimated cost.",
+          "Arabic, Hebrew, and other right-to-left text reads in the right order, even with English mixed in.",
+        ],
+      },
+      {
         version: "0.6.2",
         date: "2026-10-13",
         title: "Text and link list properties, workspace switching in Cmd+K, one-click starters, and steadier runs",

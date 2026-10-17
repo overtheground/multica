@@ -1,49 +1,13 @@
 package wecom
 
-// outbound.go — the WeCom EventChatDone / EventInboxNew subscriber. An agent's
-// answer leaves this process the way every other WeCom write does: over the
-// aibot WebSocket held in the sendersRegistry. aibot has no outbound REST path,
-// so there is nothing else to fall back on.
+// Send WeCom completions and inbox events through the lease-holding WebSocket.
+// Seal the task's existing stream bubble when available, including for empty
+// completions; otherwise send an addressed plain message from the delivery row.
 //
-// Two shapes of write, tried in this order. A round that opened a bubble when
-// the question arrived has its answer written INTO that bubble and the bubble
-// sealed — that is the whole point of the streaming reply, and it is why an
-// empty completion still has to reach this far: a spinner nobody closes is
-// worse than a short answer (stream_store.go, typing_indicator.go). A round
-// with no bubble left — a restart mid-run, a stream past its window, a frame
-// the server refused — gets an ordinary message addressed by the task's own
-// delivery row.
-//
-// REPLICA TOPOLOGY: EventChatDone / EventInboxNew are dispatched on the
-// in-process events.Bus, so the replica that publishes an event is not
-// necessarily the one holding the bot's WS lease (Slack/Lark are immune —
-// their outbound is stateless HTTP any replica can perform).
-//
-// With a sharded/dual realtime relay running, a reply or inbox push produced
-// off-lease is forwarded to the lease holder over the relay
-// (relay_outbound.go) and the single-replica constraint no longer applies to
-// routing. Without a relay — legacy mode, or no REDIS_URL — the constraint
-// stands: run the WeCom-enabled backend as a single replica. In every mode, a
-// delivery produced while NO replica holds a live connection (all of them
-// mid-reconnect) is still lost; that residual window is a durability problem
-// the relay deliberately does not solve. Boot logs which of the two regimes is
-// in effect. See router.go.
-//
-// The bubble path and the relay never contend for the same turn. A bubble is
-// writable only on the replica that painted it, which is the replica holding
-// the socket; a round whose bubble lives elsewhere finds none here and takes
-// the addressed path, which is where the relay is.
-//
-// They MEET on the replica that takes a relayed reply. That replica is by
-// definition the one holding the socket, which is the one that painted the
-// bubble — a bubble is writable only where it was painted — so the frame
-// carries the task id and deliverRelayed seals the round with it instead of
-// pushing a second message underneath (relay_outbound.go). A relayed reply
-// whose round is gone, or whose seal is refused, takes the ordinary addressed
-// path, which is what a single-replica answer does too.
-//
-// Sessions with no wecom binding are ignored so this coexists with the Slack /
-// Lark subscribers on the shared bus.
+// Off-lease events require Redis relay. Without it, deployments need one backend
+// replica; no live connection can still lose a delivery. Relayed replies carry
+// task IDs so the receiver seals the original bubble instead of duplicating it.
+// Ignore sessions without a WeCom binding.
 
 import (
 	"context"
