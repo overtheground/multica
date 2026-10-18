@@ -274,6 +274,10 @@ func TestOutboundStreamsBySendingThenEditingTheSameQuotedMessage(t *testing.T) {
 	if !ok || reply["message_id"] != float64(17) {
 		t.Fatalf("first partial reply_parameters = %#v", requests[0].body["reply_parameters"])
 	}
+	// The agent message has only begun; the status says so in whole words.
+	if requests[0].body["text"] != statusPrefix+statusWorkingText {
+		t.Fatalf("first status = %#v", requests[0].body["text"])
+	}
 
 	o.mu.Lock()
 	schedule := o.streams[taskID].schedule
@@ -287,11 +291,18 @@ func TestOutboundStreamsBySendingThenEditingTheSameQuotedMessage(t *testing.T) {
 		Content: " world",
 	}
 	o.handleTaskMessage(partial)
-	if len(requests) != 2 || requests[1].method != "editMessageText" {
-		t.Fatalf("second partial requests = %+v", requests)
+	if len(requests) != 1 {
+		t.Fatalf("an unfinished agent message reached Telegram: %+v", requests)
 	}
-	if requests[1].body["message_id"] != float64(99) || requests[1].body["text"] != "hello world" {
-		t.Fatalf("second partial body = %#v", requests[1].body)
+	o.handleTaskMessage(events.Event{
+		TaskID: taskID, Type: protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{TaskID: taskID, Type: "tool_use", Tool: "exec_command"},
+	})
+	if len(requests) != 2 || requests[1].method != "editMessageText" {
+		t.Fatalf("stage change requests = %+v", requests)
+	}
+	if requests[1].body["message_id"] != float64(99) || requests[1].body["text"] != statusPrefix+"hello world" {
+		t.Fatalf("stage change body = %#v", requests[1].body)
 	}
 
 	done := telegramTestEvent()
@@ -348,12 +359,12 @@ func TestOutboundThrottlesConcurrentTasksPerChat(t *testing.T) {
 	}
 }
 
-func TestOutboundCancellationClearsStateAndKeepsPartialMessage(t *testing.T) {
+func TestOutboundCancellationClearsStreamState(t *testing.T) {
 	o := NewOutbound(newTelegramOutboundQueries(t), nil, "", nil, nil)
 	taskID := telegramTestEvent().TaskID
 	o.mu.Lock()
 	schedule := o.retainChatLocked("bot-a", 42)
-	o.streams[taskID] = &streamState{chatID: 42, messageID: 99, accumulated: "partial", schedule: schedule}
+	o.streams[taskID] = &streamState{chatID: 42, messageID: 99, comment: "partial", schedule: schedule}
 	o.mu.Unlock()
 
 	bus := events.New()

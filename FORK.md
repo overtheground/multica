@@ -32,7 +32,7 @@ The flow:
 | Reply context: canonical text for a reply to a notification | `server/internal/integrations/telegram/notification_context.go`, `resolvers.go` |
 | Chat history for a run that cannot resume its session: the claim ships the stored conversation, the daemon renders it only without a resumed session (MUL-14) | `server/internal/handler/chat_prompt_history.go`, `daemon.go`, `agent.go`; `server/internal/daemon/prompt.go`, `types.go` |
 | `multica chat history` omits the hidden event input | `server/internal/handler/chat_history.go` |
-| Streaming path skips notification turns | `server/internal/integrations/telegram/outbound.go` |
+| Streaming path skips notification turns | `server/internal/integrations/telegram/outbound.go` (`resolveTarget`) |
 | Hidden input kind | `server/pkg/protocol/messages.go`, `server/internal/handler/chat.go`, `server/pkg/db/queries/chat.sql` |
 | Subscription API | `server/internal/handler/task_status_notification.go`, `server/cmd/server/router.go` |
 | Worker wiring | `server/cmd/server/main.go`, `server/internal/handler/handler.go` |
@@ -59,6 +59,33 @@ Tests:
 - `server/internal/daemon/prompt_task_status_notification_test.go`
 - rows added to `server/internal/daemon/daemon_test.go`, `prompt_test.go`
   and `workspace_delete_manifest_test.go`
+
+## Changes: one Telegram status message per turn (MUL-32)
+
+While an agent run works, its Telegram turn shows one status message instead
+of the raw streamed transcript, and the final answer replaces it in the same
+message.
+
+- Cause of the old single-letter placeholder: the daemon flushes the first
+  visible frame immediately, and Codex streams token deltas, so that frame was
+  the first token alone. The rest of the sentence arrived inside the chat's
+  2.5s edit cooldown and was dropped with no deferred send, so a run that went
+  on into tool calls showed the letter until the final answer.
+- The status shows `⏳ Работаю над ответом…` until the agent finishes a
+  message, then that whole message (a non-text frame proves it ended; capped
+  at 400 characters on a sentence or word boundary). After a minute in one
+  stage it adds `Всё ещё выполняется · N мин`, only while `agent_task_queue`
+  says the task is `running`.
+- A ticker (1s, in-memory unless something is due) sends what met the
+  cooldown and the elapsed line. Every status call runs under the turn's
+  streaming lease, which the final answer, the failure notice and the close
+  outrank, so a late status can never overwrite them.
+- A cancelled run or one that completes empty rewrites an existing status to
+  `⏹ Остановлено.` / `✅ Готово.`; with no status in the chat nothing is posted.
+- Code: `server/internal/integrations/telegram/stream_status.go`, with the
+  frame handler and the close path in `outbound.go`. No schema change.
+- Tests: `stream_status_test.go`; adjusted streaming rows in `outbound_test.go`,
+  `outbound_delivery_boundaries_test.go`, `outbound_stream_race_test.go`.
 
 ## Taking upstream updates
 

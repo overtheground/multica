@@ -317,8 +317,11 @@ func TestReview8545PostgresStaleStreamCannotOverwriteSettledAnswer(t *testing.T)
 	a.leaseTTL = testLeaseTTL
 	b := review8545Second(a)
 	b.leaseTTL = testLeaseTTL
+	// Text alone publishes nothing; the tool call that ends it is what sends
+	// the status update this case pauses.
+	a.handleTaskMessage(telegramPartialEvent(e.TaskID, "stale stage"))
 	done := make(chan struct{})
-	go func() { defer close(done); a.handleTaskMessage(telegramPartialEvent(e.TaskID, " stale tail")) }()
+	go func() { defer close(done); a.handleTaskMessage(telegramToolEvent(e.TaskID)) }()
 	defer func() { close(q.release); <-done }()
 	<-q.entered
 	// The paused frame still owns the turn; the final answer takes over only
@@ -412,8 +415,8 @@ func TestReview8545PostgresSupersededAttemptCannotRewriteReply(t *testing.T) {
 }
 
 // A reply settled by another replica leaves this one holding a stream and a
-// chat-scheduler reference. Nothing else can release them, so the next frame
-// for that turn must.
+// chat-scheduler reference. The next status update for that turn must release
+// them.
 func TestReview8545PostgresSettledElsewhereReleasesLocalState(t *testing.T) {
 	bot := &auditBot{}
 	a, _, c, e := review8545Setup(t, bot)
@@ -430,6 +433,7 @@ func TestReview8545PostgresSettledElsewhereReleasesLocalState(t *testing.T) {
 	}
 	c.advance(editInterval + time.Millisecond)
 	a.handleTaskMessage(telegramPartialEvent(e.TaskID, " late tail"))
+	a.handleTaskMessage(telegramToolEvent(e.TaskID))
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -574,8 +578,8 @@ func TestReview8545PostgresFailureNoticeStopsAfterLosingTheLease(t *testing.T) {
 }
 
 // Quiet is not abandoned. A run can sit in a tool call far longer than any
-// sweep interval, and reclaiming its stream would restart the reply's text
-// from whatever arrives next.
+// sweep interval, and reclaiming its stream would cut the agent message in
+// progress down to whatever arrives next.
 func TestReview8545PostgresQuietStreamSurvivesTheSweep(t *testing.T) {
 	bot := &auditBot{}
 	o, _, c, e := review8545Setup(t, bot)
@@ -593,9 +597,10 @@ func TestReview8545PostgresQuietStreamSurvivesTheSweep(t *testing.T) {
 	}
 
 	o.handleTaskMessage(telegramPartialEvent(e.TaskID, " second half"))
+	o.handleTaskMessage(telegramToolEvent(e.TaskID))
 	bot.mu.Lock()
 	defer bot.mu.Unlock()
-	if bot.messages[1] != "first half second half" {
+	if bot.messages[1] != statusPrefix+"first half second half" {
 		t.Fatalf("quiet stream lost its prefix: %q; methods=%v", bot.messages[1], bot.methods)
 	}
 }
