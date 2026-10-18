@@ -26,13 +26,12 @@ import (
 // half of the round trip, mirroring lark.Patcher / slack.Outbound on the
 // shared event bus.
 //
-// Streaming: Telegram has no stream-update protocol, so the "stream 帧" UX is
-// simulated with the platform's canonical pattern — post one placeholder
-// message on the first partial, then throttled editMessageText calls as the
-// agent's transcript grows (EventTaskMessage text frames), and a final edit /
-// send on EventChatDone. Edits are throttled per chat to stay inside
-// Telegram's editMessageText rate budget; on a 429 the streamer backs off and
-// the final content always lands via the EventChatDone path.
+// Progress: while the run works, the turn shows one status message — sent on
+// the first transcript frame, edited as the run moves from stage to stage, and
+// replaced by the final answer on EventChatDone (stream_status.go). Edits are
+// throttled per chat to stay inside Telegram's editMessageText rate budget; on
+// a 429 the status backs off and the final content always lands via the
+// EventChatDone path.
 type Outbound struct {
 	q       outboundQueries
 	decrypt Decrypter
@@ -84,6 +83,9 @@ type Outbound struct {
 type outboundQueries interface {
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	// GetAgentTaskStatus is what the status reads before it says the run is
+	// still going (stream_status.go).
+	GetAgentTaskStatus(ctx context.Context, id pgtype.UUID) (db.GetAgentTaskStatusRow, error)
 	// ListAttachmentsByChatMessage is the files the agent bound to its reply,
 	// read by the attachment hop (outbound_media.go).
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
@@ -105,12 +107,12 @@ type outboundQueries interface {
 	CloseChannelReplyDeliveryTurn(ctx context.Context, arg db.CloseChannelReplyDeliveryTurnParams) (db.ChannelReplyDelivery, error)
 }
 
-// streamState tracks one in-flight streamed reply.
+// streamState tracks one in-flight reply and the status it shows.
 type streamState struct {
 	chatID    int64
 	threadID  int64
 	replyTo   int64
-	messageID int64 // placeholder message being edited; 0 until first send
+	messageID int64 // status message being edited; 0 until first send
 	// turn is the user turn this stream belongs to, cached after the first
 	// frame resolves it: an automatic retry's lineage cannot change mid-run.
 	turn replyTurn
@@ -118,8 +120,27 @@ type streamState struct {
 	// another replica leaves this one holding local state nothing will come
 	// back for, so idle streams are reclaimed rather than kept forever.
 	lastFrameAt time.Time
-	accumulated string
 	schedule    *chatSchedule
+
+	// segment is the agent message still arriving; it may end mid-word and is
+	// never shown. comment is the last complete one, shown as the stage that
+	// began at stageAt. version counts comment changes.
+	segment string
+	comment string
+	stageAt time.Time
+	version int
+	// What Telegram shows: the text, and the version and elapsed bucket it
+	// was rendered from.
+	shownText    string
+	shownVersion int
+	shownBucket  int
+	// retryAt holds the status back after a failed call; frozen stops it for
+	// good. refreshing marks a refresh in progress; plainText drops markup
+	// Telegram refused.
+	retryAt    time.Time
+	frozen     bool
+	refreshing bool
+	plainText  bool
 }
 
 // chatSchedule serializes Telegram delivery and owns rate-limit state shared
@@ -160,8 +181,12 @@ type terminalReply struct {
 	fallbackFreshSend bool
 	plainTextFallback bool
 	plainTextEdit     bool
-	kind            terminalKind
-	settleReason    string
+	kind              terminalKind
+	settleReason      string
+	// closeEdits is set on a close whose turn already shows a status message:
+	// the close then takes the lease and rewrites that message, rather than
+	// leaving a status that says the run is still working.
+	closeEdits      bool
 	turn            replyTurn
 	turnResolved    bool
 	lease           *deliveryLease
@@ -178,7 +203,8 @@ const (
 	// terminalKindAnswer delivers the agent's reply.
 	terminalKindAnswer terminalKind = iota
 	// terminalKindClose ends a turn with no answer — cancelled, or completed
-	// empty — so a text frame still in flight cannot reopen it.
+	// empty — so a text frame still in flight cannot reopen it. A status
+	// message already in the chat is rewritten to say how the run ended.
 	terminalKindClose
 	// terminalKindNotice posts the run-failed notice.
 	terminalKindNotice
@@ -271,9 +297,6 @@ const (
 	maxNoticeEditAttempts = 2
 )
 
-// streamPlaceholder is the first frame's text while the first tokens arrive.
-const streamPlaceholder = "…"
-
 // taskFailedText is sent when the agent run fails outright.
 const taskFailedText = "❌ The agent run failed. Please try again."
 
@@ -327,8 +350,9 @@ func (o *Outbound) Register(bus *events.Bus) {
 // Telegram rate limits and network latency must never delay realtime fanout.
 func (o *Outbound) Start(ctx context.Context) {
 	o.workerOnce.Do(func() {
-		o.workerWG.Add(2)
+		o.workerWG.Add(3)
 		go o.runStreamSweeper(ctx)
+		go o.runStatusTicker(ctx)
 		o.terminalWorkerWG.Add(terminalWorkerCount)
 		for range terminalWorkerCount {
 			go o.sendTerminalReplies(ctx)
@@ -354,189 +378,76 @@ func (o *Outbound) WaitWithTimeout(timeout time.Duration) bool {
 	}
 }
 
-// handleTaskMessage streams a partial: on each agent text frame, update the
-// placeholder message (throttled). Bus delivery is synchronous, so all work
-// runs under a tight timeout and never propagates errors.
+// handleTaskMessage folds a transcript frame into the turn's status and
+// publishes it when it changed (stream_status.go). Bus delivery is
+// synchronous, so all work runs under a tight timeout and never propagates
+// errors; an update this call cannot make is left to the status ticker.
 func (o *Outbound) handleTaskMessage(e events.Event) {
 	payload, ok := e.Payload.(protocol.TaskMessagePayload)
-	if !ok || payload.Type != "text" || payload.Content == "" {
+	if !ok {
 		return
 	}
+	taskID, ok := eventTaskID(e)
+	if !ok {
+		return
+	}
+	key := util.UUIDToString(taskID)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	o.mu.Lock()
+	st := o.streams[key]
+	if st != nil {
+		st.lastFrameAt = o.now()
+		statusFrame(st, payload, o.now())
+		due := statusDueLocked(st, o.now())
+		o.mu.Unlock()
+		if due {
+			o.refreshStatus(ctx, key, st)
+		}
+		return
+	}
+	o.mu.Unlock()
+
+	// An empty text frame carries nothing; it opens no status either.
+	if payload.Type == "text" && payload.Content == "" {
+		return
+	}
 	target, err := o.resolveTarget(ctx, e, true)
 	if err != nil || target == nil {
 		return
 	}
-
-	o.mu.Lock()
-	st, exists := o.streams[target.streamKey]
-	turn := replyTurn{}
-	if exists {
-		turn = st.turn
-	}
-	o.mu.Unlock()
-	if !turn.id.Valid {
-		resolved, err := o.turnFor(ctx, target.taskID)
-		if err != nil {
-			// Treating the task as its own turn here would open a second reply
-			// beside the one a previous attempt is still holding.
-			o.logger.WarnContext(ctx, "telegram outbound: skipping stream frame; reply turn unresolved", "error", err)
-			return
-		}
-		turn = resolved
-	}
-
-	// Hold the turn for as long as this frame is talking to Telegram. A frame
-	// that checked the state and then sent would still race the final answer
-	// taking over mid-request — that gap is what put a second copy of the
-	// reply in the chat (GH #8049, #7750).
-	lease, status, acquireErr := o.acquireDelivery(ctx, target, turn, deliveryPhaseStreaming)
-	if acquireErr != nil {
-		o.logger.WarnContext(ctx, "telegram outbound: reply ownership unavailable; skipping stream frame", "error", acquireErr)
-		return
-	}
-	if status == deliveryClosed {
-		// The reply is finished — possibly by another replica, which cannot
-		// reach into this process to tidy up. Release the local stream and its
-		// chat-scheduler reference here, or they are held for good and the
-		// schedule table eventually refuses new chats.
-		o.clearStream(e)
-		return
-	}
-	if status != deliveryAcquired {
-		// Another path owns the turn right now. A stream frame is decoration —
-		// the answer still lands — so it steps aside.
-		return
-	}
-	defer o.releaseDelivery(ctx, lease)
-	if o.inheritedSend(ctx, lease) {
-		// A send this process did not make may or may not be in the chat.
+	turn, err := o.turnFor(ctx, target.taskID)
+	if err != nil {
+		// Treating the task as its own turn here would open a second reply
+		// beside the one a previous attempt is still holding.
+		o.logger.WarnContext(ctx, "telegram outbound: skipping stream frame; reply turn unresolved", "error", err)
 		return
 	}
 
 	o.mu.Lock()
-	st, exists = o.streams[target.streamKey]
-	if !exists {
+	if st = o.streams[target.streamKey]; st == nil {
 		schedule := o.retainChatLocked(target.botKey, target.chatID)
 		if schedule == nil {
 			o.mu.Unlock()
 			return
 		}
+		now := o.now()
+		// version 1 against shownVersion 0: the first status is due at once.
 		st = &streamState{
 			chatID: target.chatID, threadID: target.threadID, replyTo: target.replyTo,
-			turn: turn, schedule: schedule,
+			turn: turn, schedule: schedule, stageAt: now, version: 1,
 		}
 		o.streams[target.streamKey] = st
 	}
 	st.lastFrameAt = o.now()
-	// A reply this process did not start — the placeholder came from another
-	// replica, or from the attempt this automatic retry inherited — still
-	// edits that message instead of opening a second one. Its text is whatever
-	// this process has seen; the final answer overwrites it either way.
-	if msgID := lease.messageID(); msgID != 0 {
-		st.messageID = msgID
-	}
-	st.accumulated += payload.Content
-	snapshot := st.accumulated
-	msgID := st.messageID
+	statusFrame(st, payload, o.now())
 	o.mu.Unlock()
 
-	o.pushPartial(ctx, target, st, lease, msgID, snapshot)
-}
-
-// pushPartial sends the placeholder on the first flush and edits it after. It
-// runs under the turn's lease, so the final answer cannot take the reply over
-// between the decision made here and the call that acts on it.
-func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *streamState, lease *deliveryLease, msgID int64, snapshot string) {
-	if !st.schedule.mu.TryLock() {
-		return
-	}
-	defer st.schedule.mu.Unlock()
-	now := o.now()
-	if o.terminalAvailableAt(st.schedule, target.botKey, now).After(now) {
-		return
-	}
-
-	api := newBotAPI(o.apiBase, target.botToken, o.client)
-	text := snapshot
-	if utf16Units(text) > maxMessageUnits {
-		// Mid-stream overflow: freeze the streamed message at the cap; the full
-		// reply is delivered in chunks by the final EventChatDone send.
-		text = chunkMessage(text, maxMessageUnits)[0]
-	}
-	o.mu.Lock()
-	if o.streams[target.streamKey] != st {
-		o.mu.Unlock()
-		return
-	}
-	msgID = st.messageID
-	o.mu.Unlock()
-
-	if msgID != 0 {
-		// Re-prove the turn immediately before the edit. Acquiring it and then
-		// stalling — a slow query, a descheduled goroutine — can outlive the
-		// lease, and an edit made afterwards overwrites whatever the process
-		// that took over has already published as the final answer.
-		if !o.renewDelivery(ctx, lease) {
-			return
-		}
-		ctx, cancel := o.callContext(ctx)
-		defer cancel()
-		err := api.EditMessageText(ctx, editMessageTextParams{
-			ChatID:    st.chatID,
-			MessageID: msgID,
-			Text:      formatHTML(text),
-			ParseMode: "HTML",
-		})
-		if err != nil && !isNotModified(err) {
-			o.noteEditFailure(st.schedule, err)
-			return
-		}
-		st.schedule.lastEdit = o.now()
-		return
-	}
-
-	// Exactly one placeholder per turn, published before the call goes out so
-	// that any other process reads "a send is outstanding" rather than
-	// "nothing has been sent".
-	if !o.claimSend(ctx, lease) {
-		return
-	}
-	ctx, cancel := o.callContext(ctx)
-	defer cancel()
-	var reply *replyParameters
-	if st.replyTo != 0 {
-		reply = &replyParameters{MessageID: st.replyTo, AllowSendingWithoutReply: true}
-	}
-	m, err := api.SendMessage(ctx, sendMessageParams{
-		ChatID:          st.chatID,
-		Text:            firstNonEmpty(formatHTML(text), streamPlaceholder),
-		ParseMode:       "HTML",
-		MessageThreadID: st.threadID,
-		ReplyParameters: reply,
-	})
-	if o.recordSend(ctx, lease, true, m.MessageID, 0, err) != deliveryAccepted {
-		if err != nil {
-			o.noteEditFailure(st.schedule, err)
-		}
-		return
-	}
-	st.schedule.lastEdit = o.now()
-	o.mu.Lock()
-	st.messageID = m.MessageID
-	o.mu.Unlock()
-}
-
-// noteEditFailure applies the 429-mandated backoff to the stream; other
-// failures are logged and the stream simply stops editing (the final content
-// still lands via EventChatDone).
-func (o *Outbound) noteEditFailure(schedule *chatSchedule, err error) {
-	if wait, ok := retryAfter(err); ok {
-		schedule.setBackoffTill(o.now().Add(wait))
-		return
-	}
-	o.logger.Warn("telegram outbound: stream edit failed", "error", err)
+	// A closed turn — a frame arriving after the answer, the cancellation or
+	// a later attempt — is found by the acquire inside, which also releases
+	// the state just created.
+	o.refreshStatus(ctx, target.streamKey, st)
 }
 
 // enqueueTerminalReply only appends to a bounded keyed FIFO. events.Bus is synchronous;
@@ -785,7 +696,7 @@ func (o *Outbound) sendNextTerminalRequest(ctx context.Context, reply *terminalR
 	}
 
 	schedule := reply.schedule
-	if reply.kind == terminalKindNotice {
+	if reply.kind == terminalKindNotice || reply.kind == terminalKindClose {
 		return o.deliverFailureNotice(ctx, reply)
 	}
 	schedule.mu.Lock()
@@ -839,7 +750,10 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 		reply.turnResolved = true
 	}
 
-	if reply.kind == terminalKindClose {
+	if reply.kind == terminalKindClose && !reply.closeEdits {
+		reply.closeEdits = o.turnShowsMessage(ctx, reply.turn)
+	}
+	if reply.kind == terminalKindClose && !reply.closeEdits {
 		// Nothing to deliver — a cancelled run, or a completion with no answer.
 		// The close still has to land: it is what stops a text frame arriving
 		// afterwards from opening a placeholder nothing will ever finish.
@@ -924,7 +838,7 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 	reply.initialized = true
 	reply.schedule = schedule
 	reply.streamedMessageID = lease.messageID()
-	if reply.kind == terminalKindNotice {
+	if reply.kind == terminalKindNotice || reply.kind == terminalKindClose {
 		return terminalRequestResult{retryAt: o.now()}
 	}
 	reply.chunks = chunkMessage(chatDoneContent(reply.event.Payload), maxMessageUnits)
@@ -1109,8 +1023,8 @@ func (o *Outbound) handleTaskFailed(e events.Event) {
 	o.enqueueTerminal(e, terminalKindNotice, "failure_notice")
 }
 
-// deliverFailureNotice posts the run-failed notice, one Telegram call per
-// step. Deliberately the same shape as the answer's delivery: make at most one
+// deliverFailureNotice posts the run-failed notice, or for a close rewrites
+// the status message to say how the run ended, one Telegram call per step. Deliberately the same shape as the answer's delivery: make at most one
 // request, hand back a retryAt, and let the next step re-prove the lease
 // first. Looping inside a step — retrying an edit, or waiting out a
 // retry_after — means the call after the wait can land well past the lease, on
@@ -1142,6 +1056,11 @@ func (o *Outbound) deliverFailureNotice(ctx context.Context, reply *terminalRepl
 	if messageID := lease.messageID(); messageID != 0 && !reply.fallbackFreshSend {
 		return o.editNoticeOntoPlaceholder(ctx, api, reply, schedule, messageID)
 	}
+	if reply.kind == terminalKindClose {
+		// A close never posts a message of its own: with no status left to
+		// rewrite, it only ends the turn.
+		return o.finishClose(ctx, reply)
+	}
 	if !o.claimSend(ctx, lease) {
 		return terminalRequestResult{done: true}
 	}
@@ -1171,8 +1090,12 @@ func (o *Outbound) deliverFailureNotice(ctx context.Context, reply *terminalRepl
 // with the same failure classification the final answer uses: only a target
 // Telegram confirms is gone justifies posting a second message.
 func (o *Outbound) editNoticeOntoPlaceholder(ctx context.Context, api *botAPI, reply *terminalReply, schedule *chatSchedule, messageID int64) terminalRequestResult {
+	text, reason := taskFailedText, "failure_notice"
+	if reply.kind == terminalKindClose {
+		text, reason = closeNoticeText(reply.settleReason), reply.settleReason
+	}
 	err := api.EditMessageText(ctx, editMessageTextParams{
-		ChatID: reply.target.chatID, MessageID: messageID, Text: taskFailedText,
+		ChatID: reply.target.chatID, MessageID: messageID, Text: text,
 	})
 	if retry, ok := retryAfter(err); ok {
 		retryAt := o.now().Add(retry)
@@ -1183,9 +1106,15 @@ func (o *Outbound) editNoticeOntoPlaceholder(ctx context.Context, api *botAPI, r
 	case err == nil || isNotModified(err):
 		schedule.lastEdit = o.now()
 		schedule.setBackoffTill(time.Time{})
-		o.settleDelivery(ctx, reply.lease, "failure_notice")
+		if reply.kind == terminalKindClose {
+			return o.finishClose(ctx, reply)
+		}
+		o.settleDelivery(ctx, reply.lease, reason)
 		return terminalRequestResult{done: true}
 	case isEditTargetMissing(err):
+		if reply.kind == terminalKindClose {
+			return o.finishClose(ctx, reply)
+		}
 		reply.fallbackFreshSend = true
 		return terminalRequestResult{retryAt: o.now()}
 	case isPermanentEditRejection(err):
@@ -1207,13 +1136,42 @@ func (o *Outbound) editNoticeOntoPlaceholder(ctx context.Context, api *botAPI, r
 	}
 }
 
-// handleTaskCancelled leaves the partial Telegram message the user can already
-// see — cancellation has no final answer, and replacing visible content with a
-// synthetic notice is worse than keeping it — but closes the reply so a text
-// frame still in flight cannot open a second message beside it.
+// handleTaskCancelled closes the reply so a text frame still in flight cannot
+// open a second message beside it. A status message already in the chat is
+// rewritten to say the run stopped; nothing new is posted.
 func (o *Outbound) handleTaskCancelled(e events.Event) {
 	o.clearStream(e)
 	o.enqueueTerminal(e, terminalKindClose, "cancelled")
+}
+
+// turnShowsMessage reports whether the turn has a status message a close
+// should rewrite. A failed read answers no: the close then ends the turn as it
+// always did, leaving the message as it is.
+func (o *Outbound) turnShowsMessage(ctx context.Context, turn replyTurn) bool {
+	row, err := o.q.GetChannelReplyDelivery(ctx, turn.id)
+	if err != nil {
+		return false
+	}
+	return row.Phase != deliveryPhaseSettled && row.AttemptDepth <= turn.depth &&
+		row.SendState == deliverySendKnown && row.MessageID != ""
+}
+
+// finishClose ends a closed turn under its lease. Only the call that settles
+// it gets here — a duplicate finds the turn closed at acquire — so an empty
+// completion's files are sent exactly once.
+func (o *Outbound) finishClose(ctx context.Context, reply *terminalReply) terminalRequestResult {
+	o.settleDelivery(ctx, reply.lease, reply.settleReason)
+	if reply.settleReason == "empty_reply" {
+		o.deliverAttachments(ctx, reply)
+	}
+	return terminalRequestResult{done: true}
+}
+
+func closeNoticeText(reason string) string {
+	if reason == "cancelled" {
+		return cancelledText
+	}
+	return emptyReplyText
 }
 
 func taskFailureRetryPending(payload any) bool {

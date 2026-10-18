@@ -67,6 +67,18 @@ func telegramPartialEvent(taskID, content string) events.Event {
 	}
 }
 
+// telegramToolEvent is a tool call: the frame that proves the agent message
+// before it is complete, so the status can show it.
+func telegramToolEvent(taskID string) events.Event {
+	return events.Event{
+		TaskID: taskID,
+		Type:   protocol.EventTaskMessage,
+		Payload: protocol.TaskMessagePayload{
+			TaskID: taskID, Type: "tool_use", Tool: "exec_command",
+		},
+	}
+}
+
 // A chat:done that lands while the placeholder's sendMessage is still in
 // flight must wait for that id and edit the placeholder. Reading the
 // not-yet-recorded id used to yield 0, which posted the whole reply a second
