@@ -1074,3 +1074,41 @@ func TestReview8545PostgresSupersededAttemptDoesNotSendFiles(t *testing.T) {
 		t.Fatalf("retry's answer not delivered: %q methods=%v", bot.messages[1], bot.methods)
 	}
 }
+
+func TestOutboundVoiceOptIn(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, want string }{
+		{"reply.voice.ogg", "audio/ogg", "voice"},
+		{"REPLY.VOICE.OGG", " Audio/Ogg; codecs=opus ", "voice"},
+		{"reply.voice.ogg", "application/ogg", "voice"},
+		{"reply.ogg", "audio/ogg", "audio"},
+		{"reply.mp3", "audio/mpeg", "audio"},
+		{"reply.voice.ogg", "application/octet-stream", "document"},
+		{"reply.voice.ogg.txt", "audio/ogg", "audio"},
+	} {
+		if got := outboundAttachmentField(tc.contentType, 10, tc.name); got != tc.want {
+			t.Errorf("name=%q type=%q got=%q want=%q", tc.name, tc.contentType, got, tc.want)
+		}
+	}
+	for _, reject := range []bool{false, true} {
+		bot := &fakeBotUploads{}
+		if reject {
+			bot.reject = map[string]string{"sendVoice": "Bad Request: invalid voice"}
+		}
+		o, target := newAttachmentOutbound(t, bot, nil, map[string][]byte{"k/voice.ogg": []byte("ogg")})
+		err := o.sendAttachment(context.Background(), newBotAPI(o.apiBase, target.botToken, o.client),
+			attachmentRow(1, "https://cdn.example/k/voice.ogg", "reply.voice.ogg", "audio/ogg", 3), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 1
+		if reject {
+			want = 2
+		}
+		if len(bot.sends) != want || bot.sends[0].method != "sendVoice" || bot.sends[0].part != "voice" {
+			t.Fatalf("reject=%v sends=%+v", reject, bot.sends)
+		}
+		if reject && bot.sends[1].method != "sendDocument" {
+			t.Fatalf("fallback=%+v", bot.sends)
+		}
+	}
+}
