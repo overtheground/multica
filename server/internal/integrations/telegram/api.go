@@ -273,7 +273,7 @@ type sendMediaParams struct {
 }
 
 // SendMedia uploads one file as its own message via sendPhoto / sendDocument /
-// sendVideo / sendAudio — the multipart counterpart of SendMessage.
+// sendVideo / sendAudio / sendVoice — the multipart counterpart of SendMessage.
 func (a *botAPI) SendMedia(ctx context.Context, p sendMediaParams) (Message, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)

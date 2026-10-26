@@ -156,3 +156,15 @@ message.
 The upstream uniqueness lint permits only the nine exact historical filename pairs
 from the independent fork/upstream 573–582 allocations. All SQL files remain
 unchanged; new collisions still fail. Never renumber either side after deployment.
+
+## Optional Telegram voice replies (MUL-46)
+
+An agent may upload an OGG/Opus file named `*.voice.ogg` with
+`multica attachment upload`. For `audio/ogg` or `application/ogg`, the Telegram
+adapter sends it using `sendVoice`. Encode Opus at 48 kHz mono before uploading.
+Ordinary OGG/MP3 attachments retain their existing audio-player behavior.
+A definite Telegram 400 rejection falls back to a document; ambiguous errors
+are not retried. This changes no agent settings and enables no automatic TTS.
+Issue attachments do not route to a chat: the upload must run in the chat task
+that owns the reply. Activation requires an explicitly approved backend deploy;
+there are no migrations or restarts as part of the test.
