@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const workspaceMcpTestSecret = "sk-live-workspace-should-never-be-echoed"
@@ -466,7 +468,8 @@ func TestGetWorkspaceMcpServerConfig_AdminOnly(t *testing.T) {
 	request := func(id string) *http.Request {
 		req := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/mcp-servers/"+id+"/config", nil)
 		req = withURLParam(req, "id", testWorkspaceID)
-		return withURLParam(req, "serverId", id)
+		chi.RouteContext(req.Context()).URLParams.Add("serverId", id)
+		return req
 	}
 	for _, role := range []string{"owner", "admin", "member"} {
 		t.Run(role, func(t *testing.T) {
