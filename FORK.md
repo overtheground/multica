@@ -191,3 +191,11 @@ omit configurations. The response is `Cache-Control: no-store`; the editor
 fetches it on demand with zero query-cache retention and opens in JSON mode.
 Closing the editor clears its selection. A failed read never opens a blank
 replacement. Existing bindings and arbitrary configuration fields are preserved.
+
+## Concealed MCP configuration
+
+Saved configuration fields and JSON are not rendered until the user presses
+the eye button. Opening a dialog or changing editor tabs conceals them again.
+Hiding the configuration keeps the draft intact; parser errors never echo
+fragments of JSON. This protects incidental screenshots/accessibility reads,
+while the explicit admin configuration API retains its existing authorization.

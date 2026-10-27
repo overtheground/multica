@@ -31,7 +31,7 @@ function managedServer(overrides: Partial<ManagedMcpServer> = {}): ManagedMcpSer
   };
 }
 
-function renderDialog(overrides: Partial<ComponentProps<typeof McpServerDialog>> = {}) {
+function renderRevealedDialog(overrides: Partial<ComponentProps<typeof McpServerDialog>> = {}) {
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onOpenChange = vi.fn();
   const props = {
@@ -43,6 +43,8 @@ function renderDialog(overrides: Partial<ComponentProps<typeof McpServerDialog>>
     ...overrides,
   };
   const view = render(<McpServerDialog {...props} />, { wrapper: Wrapper });
+  const reveal = screen.queryByRole("button", { name: "Show configuration" });
+  if (reveal) fireEvent.click(reveal);
   return { ...view, onSave: props.onSave, onOpenChange: props.onOpenChange };
 }
 
@@ -51,7 +53,7 @@ describe("McpServerDialog", () => {
     "edits configuration while preserving the historical name %s exactly",
     async (name) => {
       const user = userEvent.setup();
-      const { onSave, onOpenChange } = renderDialog({
+      const { onSave, onOpenChange } = renderRevealedDialog({
         server: managedServer({ name }),
         existingNames: new Set([name]),
         hideNameWhenEditing: true,
@@ -73,7 +75,7 @@ describe("McpServerDialog", () => {
     "rejects a newly entered historical-style name during %s",
     async (action) => {
       const user = userEvent.setup();
-      const { onSave, onOpenChange } = renderDialog({
+      const { onSave, onOpenChange } = renderRevealedDialog({
         server: action === "rename" ? managedServer() : null,
       });
 
@@ -106,7 +108,7 @@ describe("McpServerDialog", () => {
     "replaces a %s server through the visual editor using %s",
     async (transport, selected, label, value, expected) => {
       const user = userEvent.setup();
-      const { onSave } = renderDialog({
+      const { onSave } = renderRevealedDialog({
         server: managedServer({ transport, config: {} }),
         replacementMode: true,
       });
@@ -115,6 +117,8 @@ describe("McpServerDialog", () => {
         "aria-selected", "true",
       );
       await user.click(screen.getByRole("tab", { name: "Visual editor" }));
+    const reveal = screen.queryByRole("button", { name: "Show configuration" });
+    if (reveal) await user.click(reveal);
       await user.click(screen.getByRole("button", { name: new RegExp(`^${selected}`) }));
       await user.type(screen.getByLabelText(label), value);
       await user.click(screen.getByRole("button", { name: "Replace configuration" }));
@@ -127,7 +131,7 @@ describe("McpServerDialog", () => {
     const user = userEvent.setup();
     let finishSave!: () => void;
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finishSave = resolve; }));
-    const { onOpenChange } = renderDialog({ server: managedServer(), onSave });
+    const { onOpenChange } = renderRevealedDialog({ server: managedServer(), onSave });
 
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -148,7 +152,7 @@ describe("McpServerDialog", () => {
     "discards an unsaved draft when dismissed with %s",
     async (action) => {
       const user = userEvent.setup();
-      const { onSave, onOpenChange } = renderDialog();
+      const { onSave, onOpenChange } = renderRevealedDialog();
       await user.type(screen.getByLabelText("Server name"), "draft");
 
       if (action === "Escape") await user.keyboard("{Escape}");
@@ -161,10 +165,11 @@ describe("McpServerDialog", () => {
 
   it("clears submitted JSON errors when returning to the visual editor", async () => {
     const user = userEvent.setup();
-    const { onSave } = renderDialog();
+    const { onSave } = renderRevealedDialog();
     await user.type(screen.getByLabelText("Server name"), "fetch");
     await user.type(screen.getByLabelText("Command"), "uvx");
     await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
     fireEvent.change(screen.getByLabelText("MCP server JSON configuration"), {
       target: { value: "{invalid" },
     });
@@ -172,6 +177,8 @@ describe("McpServerDialog", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Invalid JSON");
 
     await user.click(screen.getByRole("tab", { name: "Visual editor" }));
+    const reveal = screen.queryByRole("button", { name: "Show configuration" });
+    if (reveal) await user.click(reveal);
 
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByLabelText("Command")).toHaveValue("uvx");
@@ -182,7 +189,7 @@ describe("McpServerDialog", () => {
 
   it("removes one argument and environment row while preserving their siblings", async () => {
     const user = userEvent.setup();
-    const { onSave } = renderDialog({
+    const { onSave } = renderRevealedDialog({
       server: managedServer({
         config: {
           command: "uvx",
@@ -211,7 +218,7 @@ describe("McpServerDialog", () => {
 
   it("removes one HTTP header while preserving and editing its siblings", async () => {
     const user = userEvent.setup();
-    const { onSave } = renderDialog({
+    const { onSave } = renderRevealedDialog({
       server: managedServer({
         transport: "http",
         config: {
@@ -234,5 +241,61 @@ describe("McpServerDialog", () => {
       url: "https://example.test/mcp",
       headers: { First: "one", Updated: "four" },
     });
+  });
+});
+
+
+describe("concealed MCP configuration", () => {
+  const server = managedServer({ config: { type: "http", url: "https://mcp.example/secret-url", headers: { Authorization: "Bearer sensitive-token" }, extra: "preserved" }, transport: "http" });
+
+  it("does not render JSON or visual values before reveal; conceals each newly opened tab", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const props = { open: true, server, initialMode: "json" as const, existingNames: new Set<string>(), onSave, onOpenChange: vi.fn() };
+    const view = render(<McpServerDialog {...props} />, { wrapper: Wrapper });
+    expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
+    expect(view.container.innerHTML).not.toContain("sensitive-token");
+    expect(view.container.innerHTML).not.toContain("secret-url");
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
+    expect(screen.getByLabelText("MCP server JSON configuration")).toHaveValue(JSON.stringify(server.config, null, 2));
+    await user.click(screen.getByRole("button", { name: "Hide configuration" }));
+    expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
+    expect(view.container.innerHTML).not.toContain("sensitive-token");
+    await user.click(screen.getByRole("tab", { name: "Visual editor" }));
+    expect(screen.queryByLabelText("Server URL")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
+    expect(screen.getByLabelText("Server URL")).toHaveValue("https://mcp.example/secret-url");
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
+    view.rerender(<McpServerDialog {...props} open={false} />);
+    view.rerender(<McpServerDialog {...props} />);
+    expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
+    expect(view.container.innerHTML).not.toContain("sensitive-token");
+  });
+
+  it("keeps an edited draft when hidden and does not include parser fragments in errors", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<McpServerDialog open server={server} initialMode="json" existingNames={new Set()} onSave={onSave} onOpenChange={vi.fn()} />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
+    const draft = JSON.stringify({ ...server.config, custom: "new-secret" });
+    fireEvent.change(screen.getByLabelText("MCP server JSON configuration"), { target: { value: draft } });
+    await user.click(screen.getByRole("button", { name: "Hide configuration" }));
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
+    expect(screen.getByLabelText("MCP server JSON configuration")).toHaveValue(draft);
+    fireEvent.change(screen.getByLabelText("MCP server JSON configuration"), { target: { value: '{"secret":"sensitive-token", broken}' } });
+    await user.click(screen.getByRole("button", { name: "Hide configuration" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("alert")).not.toHaveTextContent("sensitive-token");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("can keep the saved configuration intact without revealing it", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<McpServerDialog open server={server} initialMode="json" existingNames={new Set()} onSave={onSave} onOpenChange={vi.fn()} />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).toHaveBeenCalledWith(server.name, server.config);
   });
 });

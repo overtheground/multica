@@ -115,6 +115,7 @@ describe("McpTab", () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
     await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
     const json = screen.getByRole("textbox", { name: /JSON/ });
     expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual(data.configs["srv-1"]);
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -264,6 +265,7 @@ describe("McpTab", () => {
     await user.click(screen.getByRole("button", { name: /Add server/ }));
     await user.type(screen.getByLabelText("Server name"), "github");
     await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
     const jsonInput = screen.getByLabelText("MCP server JSON configuration");
     fireEvent.change(jsonInput, { target: { value: json } });
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -425,6 +427,7 @@ describe("McpTab", () => {
     render(<McpTab />, { wrapper: Wrapper });
     await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
     expect(screen.queryByLabelText("Server name")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
     const config = { ...data.configs["srv-1"], url: "https://linear-v2.example" };
     fireEvent.change(screen.getByRole("textbox", { name: /JSON/ }), { target: { value: JSON.stringify(config) } });
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -435,6 +438,7 @@ describe("McpTab", () => {
     const user = userEvent.setup();
     const view = render(<McpTab />, { wrapper: Wrapper });
     await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
+    await user.click(screen.getByRole("button", { name: "Show configuration" }));
     const json = screen.getByRole("textbox", { name: /JSON/ });
     fireEvent.change(json, { target: { value: '{"url":"https://draft.example"}' } });
     view.rerender(<McpTab />);

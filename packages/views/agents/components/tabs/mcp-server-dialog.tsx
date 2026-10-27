@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -182,10 +182,10 @@ function parseServerJson(text: string):
     if (!isRecord(value)) return { ok: false, error: "not_object" };
     if (!value.command && !value.url) return { ok: false, error: "missing_target" };
     return { ok: true, value };
-  } catch (error) {
+  } catch {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "invalid JSON",
+      error: "invalid JSON",
     };
   }
 }
@@ -245,6 +245,7 @@ export function McpServerDialog({
   const [mode, setMode] = useState<EditorMode>("form");
   const [form, setForm] = useState<McpFormState>(emptyForm);
   const [jsonText, setJsonText] = useState("{}");
+  const [configurationVisible, setConfigurationVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const fieldId = useId();
@@ -256,6 +257,7 @@ export function McpServerDialog({
   const nameHidden = replacementMode || (hideNameWhenEditing && server !== null);
 
   useEffect(() => {
+    setConfigurationVisible(false);
     if (!open) {
       setJsonText("{}");
       setForm(emptyForm());
@@ -343,6 +345,8 @@ export function McpServerDialog({
 
   const handleModeChange = (next: string | number | null) => {
     if (next !== "form" && next !== "json") return;
+    if (next === mode) return;
+    setConfigurationVisible(false);
     if (next === "json" && mode === "form") {
       setJsonText(JSON.stringify(configFromForm(form), null, 2));
     } else if (next === "form" && mode === "json" && jsonResult.ok) {
@@ -454,9 +458,28 @@ export function McpServerDialog({
 
                   <Tabs value={mode} onValueChange={handleModeChange} className="gap-7">
                     <div className="space-y-3">
-                      <p className="text-body font-medium">
-                        {t(($) => $.tab_body.mcp_config.dialog_editor_label)}
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-body font-medium">
+                          {t(($) => $.tab_body.mcp_config.dialog_editor_label)}
+                        </p>
+                        {mode === "json" || server ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={configurationVisible
+                              ? t(($) => $.tab_body.mcp_config.dialog_hide_configuration)
+                              : t(($) => $.tab_body.mcp_config.dialog_show_configuration)}
+                            title={configurationVisible
+                              ? t(($) => $.tab_body.mcp_config.dialog_hide_configuration)
+                              : t(($) => $.tab_body.mcp_config.dialog_show_configuration)}
+                            aria-pressed={configurationVisible}
+                            onClick={() => setConfigurationVisible((visible) => !visible)}
+                          >
+                            {configurationVisible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                          </Button>
+                        ) : null}
+                      </div>
                       <TabsList className="grid w-full grid-cols-2">
                         <TabsTrigger value="form" disabled={!formAvailable}>
                           {t(($) => $.tab_body.mcp_config.dialog_form_tab)}
@@ -468,6 +491,11 @@ export function McpServerDialog({
                     </div>
 
                     <TabsContent value="form" className="space-y-6">
+                      {server && !configurationVisible ? (
+                        <p role="status" className="flex min-h-72 items-center justify-center rounded-lg border bg-muted/30 p-6 text-body text-muted-foreground">
+                          {t(($) => $.tab_body.mcp_config.dialog_configuration_hidden)}
+                        </p>
+                      ) : <>
                       <fieldset className="space-y-3">
                         <legend className="text-body font-medium">
                           {t(($) => $.tab_body.mcp_config.dialog_type_label)}
@@ -619,6 +647,7 @@ export function McpServerDialog({
                           />
                         </FieldGroup>
                       )}
+                      </>}
                     </TabsContent>
 
                     <TabsContent value="json">
@@ -634,7 +663,7 @@ export function McpServerDialog({
                             {t(($) => $.tab_body.mcp_config.dialog_native_json_hint)}
                           </FieldDescription>
                         ) : null}
-                        <Textarea
+                        {configurationVisible ? <Textarea
                           ref={jsonInputRef}
                           id="mcp-server-json"
                           name="mcp-server-json"
@@ -648,6 +677,9 @@ export function McpServerDialog({
                           aria-describedby={jsonErrorMessage ? jsonErrorId : undefined}
                           aria-label={t(($) => $.tab_body.mcp_config.dialog_json_aria)}
                         />
+                        : <p role="status" className="flex min-h-72 items-center justify-center rounded-lg border bg-muted/30 p-6 text-body text-muted-foreground">
+                          {t(($) => $.tab_body.mcp_config.dialog_configuration_hidden)}
+                        </p>}
                         {jsonErrorMessage ? (
                           <FieldError id={jsonErrorId} className="text-caption">
                             {jsonErrorMessage}
