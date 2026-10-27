@@ -80,7 +80,7 @@ describe("MCP locale contracts", () => {
       expect(agentT(($) => $.tab_body.mcp_config.dialog_replace_action)).toBe(
         replace,
       );
-      expect(settingsT(($) => $.mcp.replace_config)).toBe(replace);
+      expect(settingsT(($) => $.mcp.replace_config)).toBe(edit);
       expect(new Set([rename, edit, replace]).size).toBe(3);
     },
   );
