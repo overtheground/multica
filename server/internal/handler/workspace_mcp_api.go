@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -120,6 +122,36 @@ func (h *Handler) ListWorkspaceMcpServers(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// GetWorkspaceMcpServerConfig returns the stored entry only to a human workspace
+// administrator opening the editor. List and assignment responses stay secret-free.
+func (h *Handler) GetWorkspaceMcpServerConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	workspaceID := workspaceIDFromURL(r, "id")
+	idUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if !h.requireWorkspaceMcpWriter(w, r, workspaceID) {
+		return
+	}
+	serverUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "serverId"), "server id")
+	if !ok {
+		return
+	}
+	server, err := h.Queries.GetWorkspaceMcpServer(r.Context(), db.GetWorkspaceMcpServerParams{ID: serverUUID, WorkspaceID: idUUID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "MCP server not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load MCP server configuration")
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Config json.RawMessage `json:"config"`
+	}{Config: server.Config})
+}
+
 // requireWorkspaceMcpWriter enforces the write gate. The router already
 // restricts these routes to owner/admin, but an agent actor running under an
 // owner's PAT would satisfy that gate: adding a shared MCP server has to stay a
@@ -141,7 +173,7 @@ func (h *Handler) requireWorkspaceMcpWriter(w http.ResponseWriter, r *http.Reque
 }
 
 // WorkspaceMcpServerRequest carries one server entry. `config` is the object
-// that sits under a name in `mcpServers`; it is write-only and never returned.
+// that sits under a name in `mcpServers`; it is returned only by the human-admin configuration endpoint.
 type WorkspaceMcpServerRequest struct {
 	Name   string          `json:"name"`
 	Config json.RawMessage `json:"config"`

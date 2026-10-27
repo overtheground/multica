@@ -181,3 +181,13 @@ are not retried. This changes no agent settings and enables no automatic TTS.
 Issue attachments do not route to a chat: the upload must run in the chat task
 that owns the reply. Activation requires an explicitly approved backend deploy;
 there are no migrations or restarts as part of the test.
+
+## Editable workspace MCP JSON
+
+Human owners and administrators may explicitly read one saved MCP configuration
+through `GET /api/workspaces/{id}/mcp-servers/{serverId}/config`. Agent actors and
+ordinary members cannot use this endpoint. Lists and assignment responses still
+omit configurations. The response is `Cache-Control: no-store`; the editor
+fetches it on demand with zero query-cache retention and opens in JSON mode.
+Closing the editor clears its selection. A failed read never opens a blank
+replacement. Existing bindings and arbitrary configuration fields are preserved.

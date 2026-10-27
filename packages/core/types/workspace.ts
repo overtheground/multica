@@ -22,10 +22,8 @@ export interface Workspace {
 /**
  * One MCP server in the workspace's library.
  *
- * This is the WHOLE read shape: the stored configuration is write-only, so
- * urls, commands, headers, and env never leave the server for any role. UI
- * that needs to change an entry sends a replacement rather than editing what
- * it read back.
+ * Lists contain only this summary. The explicit human-admin editor endpoint
+ * returns the configuration separately; it never belongs in library summaries.
  *
  * `enabled` is only present on an AGENT's assignment list, where it is the
  * per-agent toggle; the workspace library listing has no binding to report.

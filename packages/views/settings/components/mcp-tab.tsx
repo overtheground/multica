@@ -21,7 +21,7 @@ import { useCurrentMember } from "@multica/core/permissions";
 import { useFeatureEnabled } from "@multica/core/config";
 import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { cn } from "@multica/ui/lib/utils";
-import { workspaceMcpServersOptions } from "@multica/core/workspace/queries";
+import { workspaceMcpServerConfigOptions, workspaceMcpServersOptions } from "@multica/core/workspace/queries";
 import {
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
@@ -42,21 +42,7 @@ import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useComposioAvailable } from "./connected-apps-tab";
 import { settingsHref } from "./settings-navigation";
 
-/**
- * The workspace MCP server library (GH #6062).
- *
- * Two things shape this screen and are worth stating up front:
- *
- *  - A server added here is given to NO agent. It is a library entry, exactly
- *    like a workspace skill: an agent owner assigns it on the agent's own MCP
- *    tab, where it also gets a per-agent on/off toggle. Nothing here reaches an
- *    agent implicitly.
- *  - The stored configuration is WRITE-ONLY. The API returns names and
- *    transports, never urls / commands / headers / env, so there is no
- *    "current value" to prefill and replacing a server means supplying its
- *    complete configuration again. Renaming stays separate and never touches
- *    the write-only entry.
- */
+// Configurations are fetched on demand for human administrators, never in lists.
 export function McpTab() {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
@@ -89,16 +75,17 @@ export function McpTab() {
     null,
   );
 
-  // The dialog is shared with the agent MCP tab, which hands it the saved
-  // entry to prefill. Here there is nothing to prefill — an edit always
-  // starts from an empty form and REPLACES the entry. The transport still
-  // comes from the safe summary so the form opens on the right one.
+  const configQuery = useQuery({
+    ...workspaceMcpServerConfigOptions(wsId, editingServer?.id ?? ""),
+    enabled: canManage && editorOpen && editingServer !== null,
+  });
+
   const dialogServer: ManagedMcpServer | null = useMemo(
     () =>
       editingServer
         ? {
             name: editingServer.name,
-            config: {},
+            config: configQuery.data?.config ?? {},
             container: "mcpServers",
             transport: editingServer.transport,
             // The library has no per-agent toggle; this field only feeds the
@@ -106,7 +93,7 @@ export function McpTab() {
             enabled: true,
           }
         : null,
-    [editingServer],
+    [editingServer, configQuery.data?.config],
   );
 
   const handleSaveServer = async (
@@ -309,12 +296,23 @@ export function McpTab() {
         </SettingsCard>
       </SettingsSection>
 
+      {editorOpen && editingServer && configQuery.isFetching ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-label={t(($) => $.mcp.replace_config)} />
+      ) : null}
+      {editorOpen && editingServer && configQuery.isError ? (
+        <p role="alert">{t(($) => $.mcp.save_failed_toast)}</p>
+      ) : null}
       <McpServerDialog
-        open={editorOpen}
+        open={editorOpen && (!editingServer || !!configQuery.data)}
         server={dialogServer}
         existingNames={existingNames}
-        replacementMode={editingServer !== null}
-        onOpenChange={setEditorOpen}
+        lockName={editingServer !== null}
+        hideNameWhenEditing
+        initialMode={editingServer ? "json" : undefined}
+        onOpenChange={(open) => {
+          setEditorOpen(open);
+          if (!open) setEditingServer(null);
+        }}
         onSave={handleSaveServer}
       />
 

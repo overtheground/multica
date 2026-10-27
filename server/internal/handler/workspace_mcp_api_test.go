@@ -457,3 +457,79 @@ func TestAgentMcpServerBinding_ResponseIsSecretFreeAndAgentActorsCannotWrite(t *
 		t.Fatalf("expected 403 for an agent actor, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestGetWorkspaceMcpServerConfig_AdminOnly(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	serverID := createWorkspaceMcpServerForTest(t, "editable-config", workspaceMcpTestEntry)
+	request := func(id string) *http.Request {
+		req := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/mcp-servers/"+id+"/config", nil)
+		req = withURLParam(req, "id", testWorkspaceID)
+		return withURLParam(req, "serverId", id)
+	}
+	for _, role := range []string{"owner", "admin", "member"} {
+		t.Run(role, func(t *testing.T) {
+			_, err := testPool.Exec(context.Background(), `UPDATE member SET role=$1 WHERE workspace_id=$2 AND user_id=$3`, role, testWorkspaceID, testUserID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer testPool.Exec(context.Background(), `UPDATE member SET role='owner' WHERE workspace_id=$1 AND user_id=$2`, testWorkspaceID, testUserID)
+			w := httptest.NewRecorder()
+			testHandler.GetWorkspaceMcpServerConfig(w, request(serverID))
+			if w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("configuration must not be cached")
+			}
+			if role == "member" {
+				if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), workspaceMcpTestSecret) {
+					t.Fatal("member read credential")
+				}
+				return
+			}
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			var result struct {
+				Config map[string]any `json:"config"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Config["url"] != "https://linear.example" || result.Config["headers"] == nil {
+				t.Fatal("saved fields missing")
+			}
+		})
+	}
+	t.Run("agent", func(t *testing.T) {
+		caller := createHandlerTestAgent(t, "mcp-config-reader", nil)
+		taskID := insertHandlerTestTask(t, caller)
+		req := request(serverID)
+		req.Header.Set("X-Actor-Source", "task_token")
+		req.Header.Set("X-Agent-ID", caller)
+		req.Header.Set("X-Task-ID", taskID)
+		w := httptest.NewRecorder()
+		testHandler.GetWorkspaceMcpServerConfig(w, req)
+		if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), workspaceMcpTestSecret) {
+			t.Fatal("agent read credential")
+		}
+	})
+	t.Run("different workspace", func(t *testing.T) {
+		_, err := testPool.Exec(context.Background(), `UPDATE workspace_mcp_server SET workspace_id='11111111-1111-1111-1111-111111111111' WHERE id=$1`, serverID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer testPool.Exec(context.Background(), `UPDATE workspace_mcp_server SET workspace_id=$1 WHERE id=$2`, testWorkspaceID, serverID)
+		w := httptest.NewRecorder()
+		testHandler.GetWorkspaceMcpServerConfig(w, request(serverID))
+		if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), workspaceMcpTestSecret) {
+			t.Fatal("cross-workspace read")
+		}
+	})
+	t.Run("invalid id", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.GetWorkspaceMcpServerConfig(w, request("invalid"))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("got %d", w.Code)
+		}
+	})
+}

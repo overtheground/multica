@@ -356,11 +356,11 @@
   "mcp": {
     "description": "追加後、エージェントの MCP タブで割り当てます。",
     "servers_title": "共有サーバー",
-    "write_only_note": "機密情報を保護するため、保存した URL、コマンド、ヘッダー、環境変数は再表示されません。変更する場合は、新しい設定をすべて入力してください。名前だけを変更しても、現在の設定とエージェントへの割り当ては維持されます。",
+    "write_only_note": "保存済みの設定は編集時に表示されます。閲覧と変更はワークスペースのオーナーと管理者のみ可能です。",
     "add_server": "サーバーを追加",
     "rename_server": "サーバー名を変更",
     "rename_action": "名前を変更",
-    "replace_config": "設定を置き換え",
+    "replace_config": "設定を編集",
     "rename_save": "名前を保存",
     "rename_cancel": "名前の変更をキャンセル",
     "rename_required": "サーバー名を入力してください。",

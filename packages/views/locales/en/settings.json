@@ -358,11 +358,11 @@
   "mcp": {
     "description": "After adding a server, assign it from an agent's MCP tab.",
     "servers_title": "Shared servers",
-    "write_only_note": "For security, saved URLs, commands, headers, and environment values aren't shown again. To change them, enter a complete new configuration. Renaming keeps the current configuration and agent assignments.",
+    "write_only_note": "Saved configurations are shown when editing. Only workspace owners and administrators can view or change them.",
     "add_server": "Add server",
     "rename_server": "Rename server",
     "rename_action": "Rename",
-    "replace_config": "Replace configuration",
+    "replace_config": "Edit configuration",
     "rename_save": "Save name",
     "rename_cancel": "Cancel rename",
     "rename_required": "Enter a server name.",

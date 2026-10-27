@@ -211,6 +211,7 @@ export function McpServerDialog({
   existingNames,
   lockName = false,
   replacementMode = false,
+  initialMode,
   hideNameWhenEditing = false,
   onOpenChange,
   onSave,
@@ -230,6 +231,7 @@ export function McpServerDialog({
    * read back and renaming is handled separately in the list.
    */
   replacementMode?: boolean;
+  initialMode?: EditorMode;
   /**
    * Keeps configuration editing separate from list-level renaming. The saved
    * name still participates in validation and is passed back unchanged.
@@ -254,7 +256,11 @@ export function McpServerDialog({
   const nameHidden = replacementMode || (hideNameWhenEditing && server !== null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setJsonText("{}");
+      setForm(emptyForm());
+      return;
+    }
     const config = replacementMode ? {} : (server?.config ?? {});
     setName(server?.name ?? "");
     // A caller on an older backend may have only the safe transport summary.
@@ -268,9 +274,9 @@ export function McpServerDialog({
           : { ...emptyForm(), transport: server.transport === "stdio" ? "stdio" : "http" },
     );
     setJsonText(JSON.stringify(config, null, 2));
-    setMode(server && !formSupportsServer(server) ? "json" : "form");
+    setMode(initialMode ?? (server && !formSupportsServer(server) ? "json" : "form"));
     setSaveAttempted(false);
-  }, [open, replacementMode, server]);
+  }, [open, replacementMode, server, initialMode]);
 
   // The form is unavailable — not merely unselected — for entries it cannot
   // represent, so switching to it cannot rewrite them either.

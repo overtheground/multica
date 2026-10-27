@@ -26,15 +26,21 @@ const server = (over: Record<string, unknown>) => ({
 const data = vi.hoisted(() => ({
   servers: [] as Array<Record<string, unknown>>,
   isLoading: false,
+  configError: false,
+  configLoading: false,
+  configs: { "srv-1": { type: "http", url: "https://linear.example", headers: { Authorization: "Bearer saved-token" }, enabled_tools: ["search"] }, "srv-2": { command: "local-tool", args: ["--stdio"] } } as Record<string, Record<string, unknown>>,
   role: "owner" as "owner" | "admin" | "member",
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(options: T) => options,
-  useQuery: () => ({ data: data.servers, isLoading: data.isLoading }),
+  useQuery: (options: { queryKey: string[]; enabled?: boolean }) => options.queryKey.at(-1) === "config"
+    ? { data: options.enabled && !data.configError && !data.configLoading ? { config: data.configs[options.queryKey[3]!] ?? { type: "http", url: "https://stream.example" } } : undefined, isError: data.configError, isFetching: data.configLoading }
+    : { data: data.servers, isLoading: data.isLoading },
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceMcpServerConfigOptions: (wsId: string, id: string) => ({ queryKey: ["workspaces", wsId, "mcp-servers", id, "config"] }),
   workspaceMcpServersOptions: () => ({ queryKey: ["workspaces", "workspace-1", "mcp-servers"] }),
   memberListOptions: () => ({ queryKey: ["workspaces", "workspace-1", "members"] }),
 }));
@@ -73,6 +79,8 @@ describe("McpTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     data.role = "owner";
+    data.configError = false;
+    data.configLoading = false;
     data.isLoading = false;
     data.servers = [
       server({ id: "srv-1", name: "linear", transport: "http" }),
@@ -96,26 +104,30 @@ describe("McpTab", () => {
     expect(screen.getByText("STDIO")).toBeVisible();
     expect(screen.getByText("Disabled")).toBeVisible();
     const replaceButton = screen.getByRole("button", {
-      name: "Replace configuration linear",
+      name: "Edit configuration linear",
     });
     expect(replaceButton).toHaveTextContent(/^$/);
     await user.hover(replaceButton);
-    expect(await screen.findByText("Replace configuration", { exact: true })).toBeVisible();
+    expect(await screen.findByText("Edit configuration", { exact: true })).toBeVisible();
   });
 
-  it.each([
-    ["linear", "Server URL", "https://mcp.example.com/mcp"],
-    ["local-tool", "Command", "npx"],
-  ])("provides a connection example when replacing %s", async (name, label, example) => {
+  it("opens the exact saved JSON including headers and additional fields", async () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
+    const json = screen.getByRole("textbox", { name: /JSON/ });
+    expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual(data.configs["srv-1"]);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mockUpdate).toHaveBeenCalledWith({ serverId: "srv-1", config: data.configs["srv-1"] });
+  });
 
-    await user.click(
-      screen.getByRole("button", { name: `Replace configuration ${name}` }),
-    );
-
-    expect(screen.getByLabelText(label)).toHaveValue("");
-    expect(screen.getByLabelText(label)).toHaveAttribute("placeholder", example);
+  it.each(["configError", "configLoading"] as const)("does not open a blank replacement while %s", async (key) => {
+    data[key] = true;
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("adds a server to the library", async () => {
@@ -408,134 +420,26 @@ describe("McpTab", () => {
     );
   });
 
-  it("replaces the full config without sending a name change", async () => {
+  it("preserves hidden fields when editing saved JSON without changing bindings or name", async () => {
     const user = userEvent.setup();
     render(<McpTab />, { wrapper: Wrapper });
-
-    await user.click(
-      screen.getAllByRole("button", {
-        name: /^Replace configuration /,
-      })[0]!,
-    );
-
-    expect(
-      screen.getByRole("heading", { name: "Replace configuration for linear" }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
     expect(screen.queryByLabelText("Server name")).toBeNull();
-    expect(screen.queryByText("Name", { exact: true })).toBeNull();
-    expect(screen.getByRole("dialog")).toHaveTextContent("linear");
-    expect(screen.getByLabelText("Server URL")).toHaveValue("");
-
-    await user.type(screen.getByLabelText("Server URL"), "https://linear-v2.example");
-    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
-
-    await waitFor(() =>
-      expect(mockUpdate).toHaveBeenCalledWith({
-        serverId: "srv-1",
-        config: { type: "http", url: "https://linear-v2.example" },
-      }),
-    );
+    const config = { ...data.configs["srv-1"], url: "https://linear-v2.example" };
+    fireEvent.change(screen.getByRole("textbox", { name: /JSON/ }), { target: { value: JSON.stringify(config) } });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledWith({ serverId: "srv-1", config }));
   });
 
-  // The JSON tab of a replacement shows the blank form's shape, not the saved
-  // entry. Neither that blank nor a partial "patch" may replace the entry.
-  it("never replaces a saved entry with the blank template or a partial patch", async () => {
-    const user = userEvent.setup();
-    render(<McpTab />, { wrapper: Wrapper });
-
-    await user.click(
-      screen.getAllByRole("button", {
-        name: /^Replace configuration /,
-      })[0]!,
-    );
-    expect(screen.getByRole("dialog")).toHaveTextContent(
-      "Saving replaces the whole entry",
-    );
-    await user.click(screen.getByRole("tab", { name: "JSON" }));
-    const json = screen.getByRole("textbox", { name: /JSON/ });
-    expect(JSON.parse((json as HTMLTextAreaElement).value)).toEqual({
-      type: "http",
-      url: "",
-    });
-
-    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
-    expect(
-      screen.getByText("The server configuration must include a command or URL."),
-    ).toBeInTheDocument();
-
-    fireEvent.change(json, {
-      target: { value: '{"enabled_tools":["add-projects"]}' },
-    });
-    await user.click(screen.getByRole("button", { name: "Replace configuration" }));
-
-    expect(
-      screen.getByText("The server configuration must include a command or URL."),
-    ).toBeInTheDocument();
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
-
-  it("keeps an in-progress replacement when the settings page rerenders", async () => {
+  it("keeps an in-progress edit when the settings page rerenders", async () => {
     const user = userEvent.setup();
     const view = render(<McpTab />, { wrapper: Wrapper });
-
-    await user.click(
-      screen.getAllByRole("button", {
-        name: /^Replace configuration /,
-      })[0]!,
-    );
-    const urlInput = screen.getByLabelText("Server URL");
-    await user.type(urlInput, "https://draft.example/mcp");
-
+    await user.click(screen.getByRole("button", { name: "Edit configuration linear" }));
+    const json = screen.getByRole("textbox", { name: /JSON/ });
+    fireEvent.change(json, { target: { value: '{"url":"https://draft.example"}' } });
     view.rerender(<McpTab />);
-
-    expect(urlInput).toHaveValue("https://draft.example/mcp");
+    expect(screen.getByRole("textbox", { name: /JSON/ })).toHaveValue('{"url":"https://draft.example"}');
   });
-
-  // The saved entry cannot be read back, but the safe summary still knows the
-  // transport — so the blank replacement form opens on the right one.
-  it("opens the replacement form on the server's own transport", async () => {
-    const user = userEvent.setup();
-    render(<McpTab />, { wrapper: Wrapper });
-
-    // Row 1 is the stdio server.
-    await user.click(
-      screen.getAllByRole("button", {
-        name: /^Replace configuration /,
-      })[1]!,
-    );
-
-    expect(screen.getByRole("button", { name: /^STDIO/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByLabelText("Command")).toHaveValue("");
-  });
-
-  // Unknown transports start in JSON because that best reflects the inventory,
-  // but replacement is explicit, so the user may intentionally switch to the
-  // visual editor and replace it with STDIO or HTTP.
-  it.each(["sse", "websocket"])(
-    "starts a %s replacement in JSON while keeping the visual editor available",
-    async (transport) => {
-      const user = userEvent.setup();
-      data.servers = [server({ name: "streamy", transport })];
-      render(<McpTab />, { wrapper: Wrapper });
-
-      await user.click(
-        screen.getByRole("button", { name: /^Replace configuration / }),
-      );
-
-      expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      expect(screen.getByRole("tab", { name: "Visual editor" })).toHaveAttribute(
-        "aria-disabled",
-        "false",
-      );
-      expect(screen.queryByLabelText("Server URL")).toBeNull();
-    },
-  );
 
   it("removes a server after confirmation", async () => {
     const user = userEvent.setup();
@@ -558,7 +462,7 @@ describe("McpTab", () => {
     expect(screen.queryByRole("button", { name: /Add server/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Rename server/ })).toBeNull();
     expect(
-      screen.queryByRole("button", { name: /^Replace configuration / }),
+      screen.queryByRole("button", { name: /^Edit configuration / }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove server/ })).toBeNull();
     expect(

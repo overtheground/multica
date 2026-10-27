@@ -2558,6 +2558,20 @@ describe("ApiClient workspace MCP servers", () => {
     updated_at: "2026-08-14T00:00:00Z",
   };
 
+  it("reads saved configuration only through the explicit no-store editor endpoint", async () => {
+    const config = { type: "http", url: "https://mcp.example", headers: { Authorization: "Bearer test-secret" }, enabled_tools: ["search"] };
+    const fetchMock = stubJSON({ config });
+    const result = await new ApiClient("https://api.example.test").getWorkspaceMcpServerConfig("ws-1", "srv-1");
+    expect(result).toEqual({ config });
+    expect(fetchMock.mock.calls[0]![0]).toContain("/api/workspaces/ws-1/mcp-servers/srv-1/config");
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ cache: "no-store" });
+  });
+
+  it.each([null, {}, { config: [] }, { config: null }, { config: "secret" }])("rejects malformed editor responses instead of providing a blank replacement: %j", async (payload) => {
+    stubJSON(payload);
+    await expect(new ApiClient("https://api.example.test").getWorkspaceMcpServerConfig("ws-1", "srv-1")).rejects.toThrow("Failed to load MCP server configuration");
+  });
+
   it("parses the workspace library", async () => {
     stubJSON([server]);
 

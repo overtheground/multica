@@ -3608,6 +3608,11 @@ export const WorkspaceMcpServerSchema = z.object({
   updated_at: z.string().default(""),
 });
 
+// Only the explicit admin editor request may parse secret-bearing configuration.
+export const WorkspaceMcpServerConfigSchema = z.object({
+  config: z.record(z.string(), z.unknown()),
+});
+
 export const WorkspaceMcpServerListSchema = z.array(WorkspaceMcpServerSchema);
 
 export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {

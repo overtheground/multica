@@ -212,3 +212,17 @@ export function agentMcpServersOptions(agentId: string) {
     enabled: agentId !== "",
   });
 }
+
+// Credentials are fetched only while editing and discarded when the editor closes.
+export function workspaceMcpServerConfigOptions(wsId: string, serverId: string) {
+  return queryOptions({
+    queryKey: [...workspaceKeys.mcpServers(wsId), serverId, "config"] as const,
+    queryFn: () => api.getWorkspaceMcpServerConfig(wsId, serverId),
+    enabled: !!wsId && !!serverId,
+    gcTime: 0,
+    staleTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}

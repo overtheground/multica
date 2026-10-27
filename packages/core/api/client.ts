@@ -479,6 +479,7 @@ import {
   PluginTokenIssueSchema,
   PluginInstallationSchema,
   PluginPreviewSchema,
+  WorkspaceMcpServerConfigSchema,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
@@ -3044,9 +3045,28 @@ export class ApiClient {
 
   /**
    * The workspace's MCP server library. The response carries identity and
-   * transport only — the stored entries are write-only server-side, so there
-   * is nothing here to redact.
+   * transport only. Configuration is fetched separately by the admin editor.
    */
+  async getWorkspaceMcpServerConfig(
+    workspaceId: string,
+    serverId: string,
+  ): Promise<{ config: Record<string, unknown> }> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mcp-servers/${encodeURIComponent(serverId)}/config`,
+      { cache: "no-store" },
+    );
+    // Do not pass a malformed credential-bearing payload to the schema logger.
+    const validated = WorkspaceMcpServerConfigSchema.safeParse(raw);
+    const parsed = parseWithFallback<{ config: Record<string, unknown> } | null>(
+      validated.success ? validated.data : null,
+      WorkspaceMcpServerConfigSchema,
+      null,
+      { endpoint: "GET /api/workspaces/{id}/mcp-servers/{serverId}/config" },
+    );
+    if (!parsed) throw new Error("Failed to load MCP server configuration");
+    return parsed;
+  }
+
   async listWorkspaceMcpServers(workspaceId: string): Promise<WorkspaceMcpServer[]> {
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/mcp-servers`);
     return parseWithFallback(raw, WorkspaceMcpServerListSchema, [] as WorkspaceMcpServer[], {
