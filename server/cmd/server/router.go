@@ -2489,6 +2489,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/task-status-notifications", h.ListTaskStatusNotificationSubscriptions)
 			r.Put("/api/task-status-notifications", h.UpdateTaskStatusNotificationSubscription)
 
+			r.Post("/api/notification-events", h.CaptureNotificationEvent)
+			r.Get("/api/notification-events/{id}", h.GetNotificationEvent)
+			r.Post("/api/notification-events/{id}/decide", h.DecideNotificationEvent)
+			r.Post("/api/notification-events/{id}/ack", h.AcknowledgeNotificationEvent)
+
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {
 				r.Get("/", h.GetNotificationPreferences)
