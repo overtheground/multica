@@ -199,7 +199,7 @@ func (o *Outbound) sendAttachment(ctx context.Context, api *botAPI, row db.Attac
 	}
 	params := sendMediaParams{
 		ChatID: target.chatID, MessageThreadID: target.threadID,
-		Field: outboundMediaField(row.ContentType, len(data)), Filename: outboundMediaName(row.Filename, row.ContentType),
+		Field: outboundAttachmentField(row.ContentType, len(data), row.Filename), Filename: outboundMediaName(row.Filename, row.ContentType),
 		ContentType: row.ContentType, Data: data,
 	}
 	message, err := api.SendMedia(ctx, params)
@@ -232,6 +232,18 @@ func (o *Outbound) readObject(ctx context.Context, rawURL string) ([]byte, error
 		return nil, fmt.Errorf("attachment is over the %d MiB upload limit", maxOutboundFileBytes>>20)
 	}
 	return data, nil
+}
+
+// outboundAttachmentField lets a producer explicitly request a Telegram voice
+// message by naming its OGG/Opus output *.voice.ogg. Ordinary audio attachments
+// keep their existing player/document behavior. Telegram validates the codec;
+// sendAttachment falls back to a document only after a definite 400 rejection.
+func outboundAttachmentField(contentType string, size int, filename string) string {
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if (ct == "audio/ogg" || ct == "application/ogg") && strings.HasSuffix(strings.ToLower(cleanFilename(filename)), ".voice.ogg") {
+		return "voice"
+	}
+	return outboundMediaField(contentType, size)
 }
 
 // outboundMediaField picks the Bot API method by content type: photos render
