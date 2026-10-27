@@ -42,6 +42,7 @@ type fakeBotAPI struct {
 	mu      sync.Mutex
 	nextID  int64
 	sent    []map[string]any
+	uploads []string
 	replies []fakeBotReply
 	server  *httptest.Server
 }
@@ -54,6 +55,22 @@ type fakeBotReply struct {
 func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 	f := &fakeBotAPI{nextID: 500}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sendDocument") || strings.HasSuffix(r.URL.Path, "/sendAudio") || strings.HasSuffix(r.URL.Path, "/sendVoice") {
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Error(err)
+				return
+			}
+			defer r.MultipartForm.RemoveAll()
+			for _, files := range r.MultipartForm.File {
+				for _, file := range files {
+					f.mu.Lock()
+					f.uploads = append(f.uploads, file.Filename)
+					f.mu.Unlock()
+				}
+			}
+			fmt.Fprint(w, `{"ok":true,"result":{"message_id":900,"chat":{"id":42,"type":"private"}}}`)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
 			http.Error(w, "unexpected method", http.StatusNotFound)
 			return
@@ -115,6 +132,7 @@ type tsnEnv struct {
 	notifier       *service.TaskStatusNotifier
 	delivery       *telegram.NotificationDelivery
 	nextMessageID  int64
+	beforeComplete func(tsnClaim)
 }
 
 func newTSNEnv(t *testing.T) *tsnEnv {
@@ -298,6 +316,9 @@ func (e *tsnEnv) claimAndCompleteInSession(output, sessionID string, rolloutMiss
 	}
 	task.Raw = resp.Task
 	markTaskRunning(e.t, e.ctx, task.ID)
+	if e.beforeComplete != nil {
+		e.beforeComplete(task)
+	}
 	if _, err := testHandler.TaskService.CompleteTask(e.ctx, parseUUID(task.ID), completeResult(e.t, output), sessionID, "", "", rolloutMissing, "", ""); err != nil {
 		e.t.Fatalf("complete task: %v", err)
 	}
