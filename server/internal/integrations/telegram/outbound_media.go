@@ -37,7 +37,7 @@ const (
 	maxOutboundPhotoBytes = 10 << 20
 	maxOutboundFileBytes  = 50 << 20
 	// attachmentBudget bounds one reply's whole delivery — every object read
-	// and every upload. Nothing waits on it.
+	// and every upload, including the synchronous notification worker hop.
 	attachmentBudget = 5 * time.Minute
 	// maxConcurrentAttachmentDeliveries bounds the deliveries in flight, and
 	// with them the goroutines and the resident bytes (one object at a time
@@ -92,7 +92,14 @@ func (o *Outbound) deliverAttachments(ctx context.Context, reply *terminalReply)
 	if err != nil || !workspaceID.Valid {
 		return
 	}
-	target := *reply.target
+	o.deliverMessageAttachments(ctx, messageID, workspaceID, *reply.target)
+}
+
+// deliverMessageAttachments is shared by ordinary replies and notification outbox sends.
+func (o *Outbound) deliverMessageAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, target replyTarget) {
+	if o.objects == nil {
+		return
+	}
 	api := newBotAPI(o.apiBase, target.botToken, o.client)
 	rows, err := o.lookupAttachments(ctx, messageID, workspaceID)
 	if err != nil {
@@ -195,10 +202,14 @@ func (o *Outbound) sendAttachment(ctx context.Context, api *botAPI, row db.Attac
 		Field: outboundMediaField(row.ContentType, len(data)), Filename: outboundMediaName(row.Filename, row.ContentType),
 		ContentType: row.ContentType, Data: data,
 	}
-	_, err = api.SendMedia(ctx, params)
+	message, err := api.SendMedia(ctx, params)
 	if err != nil && params.Field != "document" && isBadRequest(err) {
 		params.Field = "document"
-		_, err = api.SendMedia(ctx, params)
+		message, err = api.SendMedia(ctx, params)
+	}
+	if err == nil {
+		o.logger.InfoContext(ctx, "telegram outbound: attachment send confirmed by Bot API",
+			"attachment_id", uuidText(row.ID), "telegram_message_id", message.MessageID)
 	}
 	return err
 }

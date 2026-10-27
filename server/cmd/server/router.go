@@ -1221,6 +1221,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
 			h.TelegramNotifications = telegram.NewNotificationDelivery(queries, pool, box.Open, "", nil, slog.Default())
+			if store != nil {
+				h.TelegramNotifications.EnableFileDelivery(store)
+			}
 			h.TaskStatusNotifier = &service.TaskStatusNotifier{
 				Queries: queries, Tasks: h.TaskService, AppURL: appURLFromEnv(), Logger: slog.Default(),
 			}

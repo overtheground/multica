@@ -156,3 +156,17 @@ message.
 The upstream uniqueness lint permits only the nine exact historical filename pairs
 from the independent fork/upstream 573–582 allocations. All SQL files remain
 unchanged; new collisions still fail. Never renumber either side after deployment.
+
+## Telegram notification attachments (MUL-49)
+
+The task-status notification outbox now performs the same object-storage to
+Telegram attachment hop as member-triggered replies, after committing the
+canonical text delivery. The completion transaction already binds files before
+marking the notification pending; no new schema or upload protocol is needed.
+Per-file Bot API outcomes are logged separately from the text outbox state.
+File sends with uncertain outcomes are not retried, and a process crash during
+this final hop can still leave files undelivered.
+
+`scripts/local-tts/` contains the opt-in local Piper Irina +2 reply helper and
+its activation/verification contract. It does not change audio media routing
+or include the independent MUL-46 `sendVoice` patch (PR #2).

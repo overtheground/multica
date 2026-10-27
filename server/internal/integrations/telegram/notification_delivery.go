@@ -2,9 +2,9 @@ package telegram
 
 // notification_delivery.go — the outbox worker for task-status notifications
 // (service/task_status_notification.go). The agent's reply is already the
-// canonical chat message when a row reaches 'pending'; this worker only moves
-// that exact text into the member's private chat and records what Telegram
-// did with it.
+// canonical chat message when a row reaches 'pending'; this worker moves
+// its text and bound files into the member's private chat. The text outbox
+// state and per-file Bot API outcomes are recorded separately.
 //
 // The rules are the reply path's (delivery.go), applied to a durable row:
 //
@@ -47,6 +47,7 @@ type NotificationDelivery struct {
 	// test can watch an abandoned lease expire.
 	leaseTTL time.Duration
 	now      func() time.Time
+	media    *Outbound
 }
 
 // NewNotificationDelivery builds the worker. apiBase and client override the
@@ -59,6 +60,16 @@ func NewNotificationDelivery(q *db.Queries, tx engine.TxStarter, decrypt Decrypt
 		q: q, tx: tx, decrypt: decrypt, apiBase: apiBase, client: client, logger: logger,
 		leaseTTL: deliveryLeaseTTL, now: time.Now,
 	}
+}
+
+// EnableFileDelivery uses the same attachment transport as ordinary chat replies.
+// Configure at boot, before Run. Files are attempted only after the text is
+// durably settled, so an uncertain text send never leaks or duplicates files.
+func (d *NotificationDelivery) EnableFileDelivery(objects objectStore) {
+	d.media = NewOutbound(d.q, d.decrypt, d.apiBase, d.client, d.logger)
+	d.media.EnableFileDelivery(objects)
+	// Complete this hop before Tick returns; it is bounded by attachmentBudget.
+	d.media.spawn = func(f func()) { f() }
 }
 
 // Run delivers due notifications until ctx ends.
@@ -157,7 +168,10 @@ func (d *NotificationDelivery) deliver(ctx context.Context, n db.TaskStatusNotif
 			"notification_id", util.UUIDToString(n.ID), "error", err)
 		return
 	}
-	d.logger.InfoContext(ctx, "telegram notifications: delivered",
+	if d.media != nil {
+		d.media.deliverMessageAttachments(ctx, n.ChatMessageID, n.WorkspaceID, replyTarget{chatID: chatID, botToken: token})
+	}
+	d.logger.InfoContext(ctx, "telegram notifications: text delivered",
 		"notification_id", util.UUIDToString(n.ID), "issue_id", util.UUIDToString(n.IssueID),
 		"issue_status", n.IssueStatus, "chunks", len(chunks))
 }
