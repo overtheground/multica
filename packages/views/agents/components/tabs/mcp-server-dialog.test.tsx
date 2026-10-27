@@ -254,13 +254,13 @@ describe("concealed MCP configuration", () => {
     const props = { open: true, server, initialMode: "json" as const, existingNames: new Set<string>(), onSave, onOpenChange: vi.fn() };
     const view = render(<McpServerDialog {...props} />, { wrapper: Wrapper });
     expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
-    expect(view.container.innerHTML).not.toContain("sensitive-token");
-    expect(view.container.innerHTML).not.toContain("secret-url");
+    expect(document.body.innerHTML).not.toContain("sensitive-token");
+    expect(document.body.innerHTML).not.toContain("secret-url");
     await user.click(screen.getByRole("button", { name: "Show configuration" }));
     expect(screen.getByLabelText("MCP server JSON configuration")).toHaveValue(JSON.stringify(server.config, null, 2));
     await user.click(screen.getByRole("button", { name: "Hide configuration" }));
     expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
-    expect(view.container.innerHTML).not.toContain("sensitive-token");
+    expect(document.body.innerHTML).not.toContain("sensitive-token");
     await user.click(screen.getByRole("tab", { name: "Visual editor" }));
     expect(screen.queryByLabelText("Server URL")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Show configuration" }));
@@ -271,7 +271,7 @@ describe("concealed MCP configuration", () => {
     view.rerender(<McpServerDialog {...props} open={false} />);
     view.rerender(<McpServerDialog {...props} />);
     expect(screen.queryByLabelText("MCP server JSON configuration")).toBeNull();
-    expect(view.container.innerHTML).not.toContain("sensitive-token");
+    expect(document.body.innerHTML).not.toContain("sensitive-token");
   });
 
   it("keeps an edited draft when hidden and does not include parser fragments in errors", async () => {
