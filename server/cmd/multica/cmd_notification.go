@@ -18,8 +18,8 @@ func init() {
 	publish.Flags().String("file", "", "Structured UTF-8 JSON event file (required)")
 	get := &cobra.Command{Use: "get <id>", Short: "Read an event and its decision audit", Args: cobra.ExactArgs(1), RunE: runNotificationRead}
 	decide := &cobra.Command{Use: "decide <id>", Short: "Re-evaluate shadow delivery against current awareness", Args: cobra.ExactArgs(1), RunE: runNotificationDecision}
-	ack := &cobra.Command{Use: "ack <id>", Short: "Verify an explicit member acknowledgement in this task's chat", Args: cobra.ExactArgs(1), RunE: runNotificationAck}
-	ack.Flags().String("message", "", "Canonical member message ID (required); content: ack <event-id>")
+	ack := &cobra.Command{Use: "ack <id>", Short: "Verify a scoped member acknowledgement in this task's chat", Args: cobra.ExactArgs(1), RunE: runNotificationAck}
+	ack.Flags().String("message", "", "Canonical member message ID (required); explicit event ID or full scoped quota acknowledgement")
 	for _, c := range []*cobra.Command{publish, get, decide, ack} {
 		c.Flags().String("agent-id", "", "Agent UUID (human CLI only; task callers use their own agent)")
 		notificationCmd.AddCommand(c)

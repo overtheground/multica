@@ -46,7 +46,7 @@ type NotificationDecision struct {
 }
 
 func (f NotificationFacts) Validate(now time.Time) error {
-	if strings.TrimSpace(f.Subject) == "" || strings.TrimSpace(f.Period) == "" || strings.TrimSpace(f.Action) == "" {
+	if strings.TrimSpace(f.Subject) == "" || strings.TrimSpace(f.Period) == "" || strings.TrimSpace(f.Action) == "" || len(f.Subject) > 200 || len(f.Period) > 200 || len(f.Action) > 200 || strings.ContainsAny(f.Subject+f.Period+f.Action, "\r\n") {
 		return errors.New("subject, period and action are required")
 	}
 	if f.ObservedAt.IsZero() || f.ResetAt.IsZero() || f.FreshUntil.IsZero() || f.ObservedAt.After(now) || f.FreshUntil.Before(f.ObservedAt) {

@@ -3,10 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -73,6 +75,10 @@ func (h *Handler) CaptureNotificationEvent(w http.ResponseWriter, r *http.Reques
 		writeError(w, 400, "invalid notification event")
 		return
 	}
+	if dec.Decode(new(any)) != io.EOF {
+		writeError(w, 400, "expected one notification object")
+		return
+	}
 	ws, u, a, ok := h.notificationEventScope(w, r, req.AgentID)
 	if !ok {
 		return
@@ -86,8 +92,12 @@ func (h *Handler) CaptureNotificationEvent(w http.ResponseWriter, r *http.Reques
 		writeError(w, 409, err.Error())
 		return
 	}
+	if errors.Is(err, service.ErrNotificationInvalid) {
+		writeError(w, 400, err.Error())
+		return
+	}
 	if err != nil {
-		writeError(w, 400, "notification capture failed")
+		writeError(w, 503, "notification capture unavailable; retry with the same event key")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"event": e, "mode": "shadow", "delivered": false})
@@ -120,7 +130,16 @@ func (h *Handler) GetNotificationEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "audit unavailable")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"event": e, "audit": audit})
+	var outbox any
+	out, err := h.Queries.GetNotificationOutbox(r.Context(), db.GetNotificationOutboxParams{WorkspaceID: e.WorkspaceID, EventID: e.ID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 503, "outbox unavailable")
+		return
+	}
+	if err == nil {
+		outbox = out
+	}
+	writeJSON(w, 200, map[string]any{"event": e, "audit": audit, "outbox": outbox})
 }
 
 func (h *Handler) DecideNotificationEvent(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +173,10 @@ func (h *Handler) AcknowledgeNotificationEvent(w http.ResponseWriter, r *http.Re
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeError(w, 400, "invalid acknowledgement")
+		return
+	}
+	if dec.Decode(new(any)) != io.EOF {
+		writeError(w, 400, "expected one acknowledgement object")
 		return
 	}
 	message, ok := parseUUIDOrBadRequest(w, req.MessageID, "message id")

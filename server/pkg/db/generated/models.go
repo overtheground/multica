@@ -1255,12 +1255,42 @@ type NotificationEvent struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+type NotificationOutbox struct {
+	EventID        pgtype.UUID        `json:"event_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	RouteID        pgtype.UUID        `json:"route_id"`
+	RouteRevision  int64              `json:"route_revision"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	ChannelChatID  string             `json:"channel_chat_id"`
+	State          string             `json:"state"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseUntil     pgtype.Timestamptz `json:"lease_until"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	MessageIds     []string           `json:"message_ids"`
+	LastError      pgtype.Text        `json:"last_error"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	Preferences []byte             `json:"preferences"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTopicRoute struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	UserID         pgtype.UUID `json:"user_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	Producer       string      `json:"producer"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	Enabled        bool        `json:"enabled"`
+	RouteOwner     string      `json:"route_owner"`
+	Revision       int64       `json:"revision"`
 }
 
 type PersonalAccessToken struct {

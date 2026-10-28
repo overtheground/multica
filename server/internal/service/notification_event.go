@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
+var ErrNotificationInvalid = errors.New("invalid notification input")
 var ErrNotificationConflict = errors.New("notification event identity conflict")
 var ErrNotificationAckSource = errors.New("notification acknowledgement requires an explicit member message in the bound chat")
 
@@ -40,9 +41,10 @@ func (s *NotificationEventService) now() time.Time {
 }
 
 type NotificationEventInput struct {
-	EventKey string            `json:"event_key"`
-	Producer string            `json:"producer"`
-	Facts    NotificationFacts `json:"facts"`
+	EventKey string               `json:"event_key"`
+	Producer string               `json:"producer"`
+	Facts    NotificationFacts    `json:"facts"`
+	Claude   *ClaudeQuotaSnapshot `json:"claude,omitempty"`
 }
 
 func notificationTime(t time.Time) pgtype.Timestamptz {
@@ -53,10 +55,15 @@ func notificationTime(t time.Time) pgtype.Timestamptz {
 // Identity and recipient come from the authenticated handler, never the payload.
 func (s *NotificationEventService) CaptureShadow(ctx context.Context, workspace, user, agent pgtype.UUID, in NotificationEventInput) (db.NotificationEvent, error) {
 	if err := in.Facts.Validate(s.now()); err != nil {
-		return db.NotificationEvent{}, err
+		return db.NotificationEvent{}, fmt.Errorf("%w: %v", ErrNotificationInvalid, err)
+	}
+	if in.Claude != nil {
+		if _, err := RenderQuotaNotification(in); err != nil {
+			return db.NotificationEvent{}, fmt.Errorf("%w: %v", ErrNotificationInvalid, err)
+		}
 	}
 	if len(in.EventKey) == 0 || len(in.EventKey) > 200 || in.Producer != "subscription-limits" || in.Facts.ExplicitReminder {
-		return db.NotificationEvent{}, errors.New("invalid producer/key or untrusted schedule override")
+		return db.NotificationEvent{}, fmt.Errorf("%w: invalid producer/key or untrusted schedule override", ErrNotificationInvalid)
 	}
 	payload, err := json.Marshal(in)
 	if err != nil {
@@ -79,8 +86,8 @@ func notificationScope(e db.NotificationEvent) string {
 }
 
 // Acknowledge checks stored user provenance rather than accepting role/author
-// claims from a model. The grammar deliberately requires an explicit event ID;
-// semantic interpretation of natural-language acknowledgements is not implicit.
+// claims from a model. Only an explicit event ID or a complete subject/window/
+// reset statement is accepted; vague awareness is not a global mute.
 func (s *NotificationEventService) Acknowledge(ctx context.Context, workspace, user, agent, event, session, message pgtype.UUID) error {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -106,7 +113,7 @@ func (s *NotificationEventService) Acknowledge(ctx context.Context, workspace, u
 		return err
 	}
 	text := strings.TrimSpace(m.Content)
-	if text != "ack "+util.UUIDToString(event) && text != "в курсе "+util.UUIDToString(event) {
+	if !matchesNotificationAck(text, e) {
 		return ErrNotificationAckSource
 	}
 	now := s.now()
@@ -154,6 +161,17 @@ func (s *NotificationEventService) AuthorizeShadow(ctx context.Context, workspac
 	if e.State != "queued" && e.State != "deferred" && e.State != "shadow_send" {
 		return NotificationDecision{Verdict: NotificationSuppress, Reason: "already_decided:" + e.State}, nil
 	}
+	d, err := s.evaluate(ctx, tx, e, "shadow_send")
+	if err != nil {
+		return d, err
+	}
+	return d, tx.Commit(ctx)
+}
+
+// evaluate runs under the event's scope lock; callers choose only the send state.
+func (s *NotificationEventService) evaluate(ctx context.Context, tx pgx.Tx, e db.NotificationEvent, sendState string) (NotificationDecision, error) {
+	q := db.New(tx)
+	var err error
 	now := s.now()
 	if e.RetryAt.Valid && now.Before(e.RetryAt.Time) {
 		retry := e.RetryAt.Time
@@ -168,7 +186,7 @@ func (s *NotificationEventService) AuthorizeShadow(ctx context.Context, workspac
 			return q.GetNotificationAwareness(ctx, p)
 		}
 	}
-	a, readErr := reader(ctx, tx, q, db.GetNotificationAwarenessParams{WorkspaceID: workspace, UserID: user, AgentID: agent, Subject: e.Subject, Period: e.Period})
+	a, readErr := reader(ctx, tx, q, db.GetNotificationAwarenessParams{WorkspaceID: e.WorkspaceID, UserID: e.UserID, AgentID: e.AgentID, Subject: e.Subject, Period: e.Period})
 	readFailed := readErr != nil && !errors.Is(readErr, pgx.ErrNoRows)
 	firstFailure := e.FirstAckFailureAt
 	if readFailed {
@@ -190,7 +208,7 @@ func (s *NotificationEventService) AuthorizeShadow(ctx context.Context, workspac
 	}
 	f := NotificationFacts{Subject: e.Subject, Period: e.Period, Action: e.Action, ObservedAt: e.ObservedAt.Time, ResetAt: e.ResetAt.Time, FreshUntil: e.FreshUntil.Time, Urgency: e.Urgency}
 	d := DecideNotification(f, awareness, readFailed, firstFailure.Time, now)
-	state := "shadow_send"
+	state := sendState
 	if d.Verdict == NotificationSuppress {
 		state = "suppressed"
 	}
@@ -208,13 +226,13 @@ func (s *NotificationEventService) AuthorizeShadow(ctx context.Context, workspac
 	if d.RetryAt != nil {
 		retry = notificationTime(*d.RetryAt)
 	}
-	updated, err := q.RecordNotificationDecision(ctx, db.RecordNotificationDecisionParams{WorkspaceID: workspace, ID: event, ExpectedRevision: e.Revision, State: state, DecisionReason: pgtype.Text{String: d.Reason, Valid: true}, AckMessageID: ackID, RetryAt: retry, FirstAckFailureAt: firstFailure})
+	updated, err := q.RecordNotificationDecision(ctx, db.RecordNotificationDecisionParams{WorkspaceID: e.WorkspaceID, ID: e.ID, ExpectedRevision: e.Revision, State: state, DecisionReason: pgtype.Text{String: d.Reason, Valid: true}, AckMessageID: ackID, RetryAt: retry, FirstAckFailureAt: firstFailure})
 	if err != nil {
 		return NotificationDecision{}, err
 	}
-	err = q.AppendNotificationDecisionAudit(ctx, db.AppendNotificationDecisionAuditParams{ID: dbid.NewV7(), WorkspaceID: workspace, EventID: event, Verdict: string(d.Verdict), Reason: d.Reason, AckMessageID: ackID, EventRevision: updated.Revision, Phase: "authorize"})
+	err = q.AppendNotificationDecisionAudit(ctx, db.AppendNotificationDecisionAuditParams{ID: dbid.NewV7(), WorkspaceID: e.WorkspaceID, EventID: e.ID, Verdict: string(d.Verdict), Reason: d.Reason, AckMessageID: ackID, EventRevision: updated.Revision, Phase: "authorize"})
 	if err != nil {
 		return NotificationDecision{}, err
 	}
-	return d, tx.Commit(ctx)
+	return d, nil
 }

@@ -122,6 +122,23 @@ func (q *Queries) CaptureNotificationEvent(ctx context.Context, arg CaptureNotif
 	return i, err
 }
 
+const expireNotificationOutbox = `-- name: ExpireNotificationOutbox :exec
+WITH expired AS (
+ UPDATE notification_outbox SET state='unknown',last_error='abandoned send; outcome unknown',updated_at=clock_timestamp()
+ WHERE state='sending' AND lease_until<clock_timestamp() RETURNING workspace_id,event_id
+), updated AS (
+ UPDATE notification_event e SET state='unknown',decision_reason='abandoned_send_unknown',revision=e.revision+1,updated_at=clock_timestamp()
+ FROM expired x WHERE e.id=x.event_id AND e.workspace_id=x.workspace_id RETURNING e.id, e.workspace_id, e.user_id, e.agent_id, e.producer, e.event_key, e.payload, e.subject, e.period, e.action, e.observed_at, e.reset_at, e.fresh_until, e.urgency, e.route_owner, e.state, e.decision_reason, e.ack_message_id, e.retry_at, e.first_ack_failure_at, e.revision, e.created_at, e.updated_at
+)
+INSERT INTO notification_decision_audit(id,workspace_id,event_id,verdict,reason,event_revision,phase)
+SELECT gen_random_uuid(),workspace_id,id,'send','abandoned_send_unknown',revision,'authorize' FROM updated
+`
+
+func (q *Queries) ExpireNotificationOutbox(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, expireNotificationOutbox)
+	return err
+}
+
 const getNotificationAckSource = `-- name: GetNotificationAckSource :one
 SELECT m.id,m.chat_session_id,m.content,m.role,m.message_kind,m.created_at
 FROM chat_message m JOIN chat_session s ON s.id=m.chat_session_id
@@ -241,6 +258,122 @@ func (q *Queries) GetNotificationEvent(ctx context.Context, arg GetNotificationE
 		&i.FirstAckFailureAt,
 		&i.Revision,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNotificationOutbox = `-- name: GetNotificationOutbox :one
+SELECT event_id, workspace_id, route_id, route_revision, installation_id, chat_session_id, chat_message_id, channel_chat_id, state, lease_token, lease_until, next_attempt_at, message_ids, last_error, updated_at FROM notification_outbox WHERE workspace_id= $1 AND event_id= $2
+`
+
+type GetNotificationOutboxParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EventID     pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) GetNotificationOutbox(ctx context.Context, arg GetNotificationOutboxParams) (NotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, getNotificationOutbox, arg.WorkspaceID, arg.EventID)
+	var i NotificationOutbox
+	err := row.Scan(
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.RouteID,
+		&i.RouteRevision,
+		&i.InstallationID,
+		&i.ChatSessionID,
+		&i.ChatMessageID,
+		&i.ChannelChatID,
+		&i.State,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.NextAttemptAt,
+		&i.MessageIds,
+		&i.LastError,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNotificationTopicRoute = `-- name: GetNotificationTopicRoute :one
+SELECT id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision FROM notification_topic_route WHERE workspace_id= $1 AND user_id= $2
+ AND agent_id= $3 AND producer= $4 FOR SHARE
+`
+
+type GetNotificationTopicRouteParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Producer    string      `json:"producer"`
+}
+
+func (q *Queries) GetNotificationTopicRoute(ctx context.Context, arg GetNotificationTopicRouteParams) (NotificationTopicRoute, error) {
+	row := q.db.QueryRow(ctx, getNotificationTopicRoute,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.AgentID,
+		arg.Producer,
+	)
+	var i NotificationTopicRoute
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.AgentID,
+		&i.Producer,
+		&i.InstallationID,
+		&i.Enabled,
+		&i.RouteOwner,
+		&i.Revision,
+	)
+	return i, err
+}
+
+const insertNotificationOutbox = `-- name: InsertNotificationOutbox :one
+INSERT INTO notification_outbox(event_id,workspace_id,route_id,route_revision,installation_id,
+ chat_session_id,chat_message_id,channel_chat_id)
+VALUES ( $1, $2, $3, $4, $5,
+ $6, $7, $8) RETURNING event_id, workspace_id, route_id, route_revision, installation_id, chat_session_id, chat_message_id, channel_chat_id, state, lease_token, lease_until, next_attempt_at, message_ids, last_error, updated_at
+`
+
+type InsertNotificationOutboxParams struct {
+	EventID        pgtype.UUID `json:"event_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	RouteID        pgtype.UUID `json:"route_id"`
+	RouteRevision  int64       `json:"route_revision"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	ChatMessageID  pgtype.UUID `json:"chat_message_id"`
+	ChannelChatID  string      `json:"channel_chat_id"`
+}
+
+func (q *Queries) InsertNotificationOutbox(ctx context.Context, arg InsertNotificationOutboxParams) (NotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, insertNotificationOutbox,
+		arg.EventID,
+		arg.WorkspaceID,
+		arg.RouteID,
+		arg.RouteRevision,
+		arg.InstallationID,
+		arg.ChatSessionID,
+		arg.ChatMessageID,
+		arg.ChannelChatID,
+	)
+	var i NotificationOutbox
+	err := row.Scan(
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.RouteID,
+		&i.RouteRevision,
+		&i.InstallationID,
+		&i.ChatSessionID,
+		&i.ChatMessageID,
+		&i.ChannelChatID,
+		&i.State,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.NextAttemptAt,
+		&i.MessageIds,
+		&i.LastError,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -394,6 +527,130 @@ func (q *Queries) RecordNotificationDecision(ctx context.Context, arg RecordNoti
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const recordNotificationOutboxChunk = `-- name: RecordNotificationOutboxChunk :execrows
+UPDATE notification_outbox SET message_ids=array_append(message_ids, $1::text),updated_at=clock_timestamp()
+WHERE workspace_id= $2 AND event_id= $3 AND state='sending' AND lease_token= $4
+ AND cardinality(message_ids)= $5::integer
+`
+
+type RecordNotificationOutboxChunkParams struct {
+	MessageID   string      `json:"message_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EventID     pgtype.UUID `json:"event_id"`
+	LeaseToken  pgtype.UUID `json:"lease_token"`
+	ChunkIndex  int32       `json:"chunk_index"`
+}
+
+func (q *Queries) RecordNotificationOutboxChunk(ctx context.Context, arg RecordNotificationOutboxChunkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordNotificationOutboxChunk,
+		arg.MessageID,
+		arg.WorkspaceID,
+		arg.EventID,
+		arg.LeaseToken,
+		arg.ChunkIndex,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reserveNotificationOutbox = `-- name: ReserveNotificationOutbox :one
+UPDATE notification_outbox SET state='sending',lease_token= $1,
+ lease_until=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp()
+WHERE workspace_id= $2 AND event_id= $3 AND state='pending'
+ AND next_attempt_at<=clock_timestamp() RETURNING event_id, workspace_id, route_id, route_revision, installation_id, chat_session_id, chat_message_id, channel_chat_id, state, lease_token, lease_until, next_attempt_at, message_ids, last_error, updated_at
+`
+
+type ReserveNotificationOutboxParams struct {
+	LeaseToken  pgtype.UUID `json:"lease_token"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EventID     pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) ReserveNotificationOutbox(ctx context.Context, arg ReserveNotificationOutboxParams) (NotificationOutbox, error) {
+	row := q.db.QueryRow(ctx, reserveNotificationOutbox, arg.LeaseToken, arg.WorkspaceID, arg.EventID)
+	var i NotificationOutbox
+	err := row.Scan(
+		&i.EventID,
+		&i.WorkspaceID,
+		&i.RouteID,
+		&i.RouteRevision,
+		&i.InstallationID,
+		&i.ChatSessionID,
+		&i.ChatMessageID,
+		&i.ChannelChatID,
+		&i.State,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.NextAttemptAt,
+		&i.MessageIds,
+		&i.LastError,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setNotificationOutboxOutcome = `-- name: SetNotificationOutboxOutcome :execrows
+UPDATE notification_outbox SET state= $1,last_error= $2,
+ next_attempt_at= $3,message_ids= $4,updated_at=clock_timestamp()
+WHERE workspace_id= $5 AND event_id= $6 AND state='sending' AND lease_token= $7
+`
+
+type SetNotificationOutboxOutcomeParams struct {
+	State         string             `json:"state"`
+	LastError     pgtype.Text        `json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	MessageIds    []string           `json:"message_ids"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EventID       pgtype.UUID        `json:"event_id"`
+	LeaseToken    pgtype.UUID        `json:"lease_token"`
+}
+
+func (q *Queries) SetNotificationOutboxOutcome(ctx context.Context, arg SetNotificationOutboxOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setNotificationOutboxOutcome,
+		arg.State,
+		arg.LastError,
+		arg.NextAttemptAt,
+		arg.MessageIds,
+		arg.WorkspaceID,
+		arg.EventID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setNotificationRouteOwner = `-- name: SetNotificationRouteOwner :execrows
+UPDATE notification_event SET route_owner= $1,revision=revision+1,updated_at=clock_timestamp()
+WHERE workspace_id= $2 AND id= $3 AND revision= $4
+ AND route_owner= $5 AND state IN ('queued','shadow_send','deferred')
+`
+
+type SetNotificationRouteOwnerParams struct {
+	RouteOwner       string      `json:"route_owner"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ID               pgtype.UUID `json:"id"`
+	ExpectedRevision int64       `json:"expected_revision"`
+	ExpectedOwner    string      `json:"expected_owner"`
+}
+
+func (q *Queries) SetNotificationRouteOwner(ctx context.Context, arg SetNotificationRouteOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setNotificationRouteOwner,
+		arg.RouteOwner,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.ExpectedRevision,
+		arg.ExpectedOwner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertNotificationAwareness = `-- name: UpsertNotificationAwareness :one
