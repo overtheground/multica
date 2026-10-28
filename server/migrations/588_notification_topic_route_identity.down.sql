@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS notification_topic_route_identity;

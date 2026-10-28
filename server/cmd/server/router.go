@@ -1224,6 +1224,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			if store != nil {
 				h.TelegramNotifications.EnableFileDelivery(store)
 			}
+			// A release flag and separate per-member consent are both required.
+			// Neither is enabled by installing the schema or publishing events.
+			if os.Getenv("MULTICA_STRUCTURED_NOTIFICATIONS_ENABLED") == "true" && h.NotificationEvents != nil {
+				h.NotificationEventWorker = &service.NotificationEventWorker{Events: h.NotificationEvents, Transport: &telegram.EventTransport{Decrypt: box.Open}, Enabled: true, BatchSize: 20}
+			}
 			h.TaskStatusNotifier = &service.TaskStatusNotifier{
 				Queries: queries, Tasks: h.TaskService, AppURL: appURLFromEnv(), Logger: slog.Default(),
 			}
@@ -2488,6 +2493,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Task-status notifications in the member's private agent chat (MUL-11).
 			r.Get("/api/task-status-notifications", h.ListTaskStatusNotificationSubscriptions)
 			r.Put("/api/task-status-notifications", h.UpdateTaskStatusNotificationSubscription)
+
+			r.Get("/api/notification-topics", h.GetNotificationTopic)
+			r.With(handler.RequireHumanActor).Put("/api/notification-topics", h.ConfigureNotificationTopic)
+			r.With(handler.RequireHumanActor).Post("/api/notification-events/{id}/rollback", h.RollbackNotificationEvent)
+			r.Post("/api/notification-events", h.CaptureNotificationEvent)
+			r.Get("/api/notification-events/{id}", h.GetNotificationEvent)
+			r.Post("/api/notification-events/{id}/decide", h.DecideNotificationEvent)
+			r.Post("/api/notification-events/{id}/ack", h.AcknowledgeNotificationEvent)
 
 			// Notification preferences
 			r.Route("/api/notification-preferences", func(r chi.Router) {

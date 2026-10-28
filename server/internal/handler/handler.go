@@ -373,8 +373,10 @@ type Handler struct {
 	// composed into the member's private chat; TaskStatusNotifier decides
 	// which results become such notifications. Both nil unless Telegram is
 	// configured — it is the only delivery surface (MUL-11).
-	TelegramNotifications *telegram.NotificationDelivery
-	TaskStatusNotifier    *service.TaskStatusNotifier
+	TelegramNotifications   *telegram.NotificationDelivery
+	TaskStatusNotifier      *service.TaskStatusNotifier
+	NotificationEvents      *service.NotificationEventService
+	NotificationEventWorker *service.NotificationEventWorker
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
@@ -540,6 +542,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if err != nil {
 		// Malformed key is operator-actionable; the pipeline stays disabled.
 		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
+	}
+	if pool, ok := txStarter.(service.NotificationEventDB); ok {
+		h.NotificationEvents = &service.NotificationEventService{Pool: pool}
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
 	taskSvc.PRSnapshotsEnabled = h.PRRefresh.Enabled()

@@ -1201,12 +1201,111 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type NotificationAwareness struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Subject         string             `json:"subject"`
+	Period          string             `json:"period"`
+	Action          string             `json:"action"`
+	SourceMessageID pgtype.UUID        `json:"source_message_id"`
+	SourceSessionID pgtype.UUID        `json:"source_session_id"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Revision        int64              `json:"revision"`
+}
+
+type NotificationDecisionAudit struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EventID       pgtype.UUID        `json:"event_id"`
+	Verdict       string             `json:"verdict"`
+	Reason        string             `json:"reason"`
+	AckMessageID  pgtype.UUID        `json:"ack_message_id"`
+	EventRevision int64              `json:"event_revision"`
+	Phase         string             `json:"phase"`
+	PolicyVersion string             `json:"policy_version"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type NotificationEvent struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	Producer          string             `json:"producer"`
+	EventKey          string             `json:"event_key"`
+	Payload           []byte             `json:"payload"`
+	Subject           string             `json:"subject"`
+	Period            string             `json:"period"`
+	Action            string             `json:"action"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	ResetAt           pgtype.Timestamptz `json:"reset_at"`
+	FreshUntil        pgtype.Timestamptz `json:"fresh_until"`
+	Urgency           string             `json:"urgency"`
+	RouteOwner        string             `json:"route_owner"`
+	State             string             `json:"state"`
+	DecisionReason    pgtype.Text        `json:"decision_reason"`
+	AckMessageID      pgtype.UUID        `json:"ack_message_id"`
+	RetryAt           pgtype.Timestamptz `json:"retry_at"`
+	FirstAckFailureAt pgtype.Timestamptz `json:"first_ack_failure_at"`
+	Revision          int64              `json:"revision"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationOutbox struct {
+	EventID        pgtype.UUID        `json:"event_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	RouteID        pgtype.UUID        `json:"route_id"`
+	RouteRevision  int64              `json:"route_revision"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	ChannelChatID  string             `json:"channel_chat_id"`
+	State          string             `json:"state"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseUntil     pgtype.Timestamptz `json:"lease_until"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	MessageIds     []string           `json:"message_ids"`
+	LastError      pgtype.Text        `json:"last_error"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	Preferences []byte             `json:"preferences"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTopicRoute struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	Producer       string             `json:"producer"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Enabled        bool               `json:"enabled"`
+	RouteOwner     string             `json:"route_owner"`
+	Revision       int64              `json:"revision"`
+	EligibleAfter  pgtype.Timestamptz `json:"eligible_after"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTopicRouteAudit struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RouteID       pgtype.UUID        `json:"route_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	Revision      int64              `json:"revision"`
+	PreviousOwner string             `json:"previous_owner"`
+	RouteOwner    string             `json:"route_owner"`
+	Enabled       bool               `json:"enabled"`
+	Reason        string             `json:"reason"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type PersonalAccessToken struct {
