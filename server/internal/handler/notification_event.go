@@ -100,7 +100,7 @@ func (h *Handler) CaptureNotificationEvent(w http.ResponseWriter, r *http.Reques
 		writeError(w, 503, "notification capture unavailable; retry with the same event key")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"event": e, "mode": "shadow", "delivered": false})
+	writeJSON(w, 200, map[string]any{"event": e, "mode": e.RouteOwner, "delivered": e.State == "sent"})
 }
 
 func (h *Handler) ownNotificationEvent(w http.ResponseWriter, r *http.Request) (db.NotificationEvent, bool) {

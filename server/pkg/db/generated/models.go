@@ -1282,15 +1282,30 @@ type NotificationPreference struct {
 }
 
 type NotificationTopicRoute struct {
-	ID             pgtype.UUID `json:"id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	UserID         pgtype.UUID `json:"user_id"`
-	AgentID        pgtype.UUID `json:"agent_id"`
-	Producer       string      `json:"producer"`
-	InstallationID pgtype.UUID `json:"installation_id"`
-	Enabled        bool        `json:"enabled"`
-	RouteOwner     string      `json:"route_owner"`
-	Revision       int64       `json:"revision"`
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	Producer       string             `json:"producer"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Enabled        bool               `json:"enabled"`
+	RouteOwner     string             `json:"route_owner"`
+	Revision       int64              `json:"revision"`
+	EligibleAfter  pgtype.Timestamptz `json:"eligible_after"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationTopicRouteAudit struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RouteID       pgtype.UUID        `json:"route_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	Revision      int64              `json:"revision"`
+	PreviousOwner string             `json:"previous_owner"`
+	RouteOwner    string             `json:"route_owner"`
+	Enabled       bool               `json:"enabled"`
+	Reason        string             `json:"reason"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type PersonalAccessToken struct {

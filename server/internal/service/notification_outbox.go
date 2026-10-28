@@ -32,7 +32,7 @@ type NotificationSendResult struct {
 	Err        error
 }
 
-// QueueDirect is deliberately not wired into producer ingress or server boot.
+// QueueDirect is invoked only by the explicitly enabled bounded worker.
 // Activation needs a separately approved topic route. Existing issue-result
 // consent cannot authorize this producer. Canonical message and outbox are atomic.
 func (s *NotificationEventService) QueueDirect(ctx context.Context, workspace, event pgtype.UUID, expectedRevision int64) (db.NotificationOutbox, error) {
@@ -60,7 +60,7 @@ func (s *NotificationEventService) QueueDirect(ctx context.Context, workspace, e
 	if err != nil {
 		return db.NotificationOutbox{}, err
 	}
-	if !topic.Enabled || topic.RouteOwner != "direct" {
+	if !topic.Enabled || topic.RouteOwner != "direct" || (topic.EligibleAfter.InfinityModifier == pgtype.Finite && e.CreatedAt.Time.Before(topic.EligibleAfter.Time)) {
 		return db.NotificationOutbox{}, routeRefused("topic_not_authorized")
 	}
 	route, err := ResolveTaskStatusNotificationRoute(ctx, q, workspace, e.UserID, e.AgentID, topic.InstallationID, true)

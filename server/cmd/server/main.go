@@ -778,6 +778,9 @@ func main() {
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
 	}
+	if h.NotificationEventWorker != nil {
+		go h.NotificationEventWorker.Run(sweepCtx, 5*time.Second, func(err error) { slog.Warn("structured notification worker failed", "error", err) })
+	}
 	if h.TaskStatusNotifier != nil && h.TelegramNotifications != nil {
 		go h.TaskStatusNotifier.Run(sweepCtx, 5*time.Second)
 		go h.TelegramNotifications.Run(sweepCtx, 2*time.Second)

@@ -10,7 +10,7 @@ import (
 )
 
 // EventTransport reuses the task-status sender's chunking, markup fallback and
-// error classification. It is not started at boot; producer ingress stays shadow.
+// error classification. The worker needs explicit release and topic opt-in.
 type EventTransport struct {
 	Decrypt Decrypter
 	APIBase string

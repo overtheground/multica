@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -17,7 +18,7 @@ type ClaudeQuotaSnapshot struct {
 
 func RenderQuotaNotification(in NotificationEventInput) (string, error) {
 	if in.Claude == nil {
-		return "", errors.New("both Claude windows required for direct delivery")
+		in.Claude = &ClaudeQuotaSnapshot{}
 	}
 	window := func(label string, w QuotaWindow) (string, error) {
 		remaining := "неизвестно"
@@ -41,5 +42,9 @@ func RenderQuotaNotification(in NotificationEventInput) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Снимок лимитов от %s (UTC).\n%s\n%s\nСнимок действителен до %s. После этой даты или сброса текущее состояние требует проверки.", in.Facts.ObservedAt.UTC().Format(time.RFC3339), five, week, in.Facts.FreshUntil.UTC().Format(time.RFC3339)), nil
+	account := "Claude"
+	if parts := strings.Split(in.Facts.Subject, "/"); len(parts) == 3 {
+		account += " — аккаунт " + parts[1]
+	}
+	return fmt.Sprintf("%s. Снимок лимитов от %s (UTC).\n%s\n%s\nСнимок действителен до %s. После этой даты или сброса текущее состояние требует проверки.", account, in.Facts.ObservedAt.UTC().Format(time.RFC3339), five, week, in.Facts.FreshUntil.UTC().Format(time.RFC3339)), nil
 }

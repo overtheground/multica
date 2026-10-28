@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY IF NOT EXISTS notification_event_pending ON notification_event(workspace_id,user_id,agent_id,producer,created_at) WHERE route_owner='shadow' AND state IN ('queued','shadow_send','deferred');

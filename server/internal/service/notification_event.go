@@ -20,8 +20,8 @@ var ErrNotificationInvalid = errors.New("invalid notification input")
 var ErrNotificationConflict = errors.New("notification event identity conflict")
 var ErrNotificationAckSource = errors.New("notification acknowledgement requires an explicit member message in the bound chat")
 
-// NotificationEventService never calls a transport. Shadow authorization is a
-// durable decision, not a visible chat message or an issue lifecycle transition.
+// NotificationEventService owns capture, awareness and outbox authorization.
+// Shadow authorization alone creates no visible chat message or external send.
 type NotificationEventDB interface {
 	db.DBTX
 	Begin(context.Context) (pgx.Tx, error)

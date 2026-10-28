@@ -24,10 +24,36 @@ func init() {
 		c.Flags().String("agent-id", "", "Agent UUID (human CLI only; task callers use their own agent)")
 		notificationCmd.AddCommand(c)
 	}
+	topic := &cobra.Command{Use: "topic", Short: "Inspect or configure your own structured-notification consent"}
+	topicGet := &cobra.Command{Use: "get", Args: cobra.NoArgs, RunE: runNotificationTopicGet}
+	topicSet := &cobra.Command{Use: "set", Short: "Human only: configure topic ownership with a revision check", Args: cobra.NoArgs, RunE: runNotificationTopicSet}
+	for _, c := range []*cobra.Command{topicGet, topicSet} {
+		c.Flags().String("agent-id", "", "Agent UUID")
+		c.Flags().String("producer", "subscription-limits", "Structured producer")
+		topic.AddCommand(c)
+	}
+	topicSet.Flags().String("installation", "", "Private Telegram installation UUID (required)")
+	topicSet.Flags().Int64("revision", 0, "Expected revision from topic get; 0 creates a route (required)")
+	topicSet.Flags().String("owner", "shadow", "Route owner: shadow, legacy, direct")
+	topicSet.Flags().Bool("enabled", false, "Explicit topic consent")
+	topicSet.Flags().Bool("legacy-stopped", false, "Confirm the old producer is stopped; required for direct activation")
+	notificationCmd.AddCommand(topic)
+	rollback := &cobra.Command{Use: "rollback <id>", Args: cobra.ExactArgs(1), Short: "Human only: return an unsent event to shadow", RunE: func(cmd *cobra.Command, args []string) error {
+		return notificationRequest(cmd, notificationPath(cmd, args[0], "/rollback"), map[string]any{}, false)
+	}}
+	rollback.Flags().String("agent-id", "", "Agent UUID")
+	notificationCmd.AddCommand(rollback)
 	rootCmd.AddCommand(notificationCmd)
 }
 
 func notificationRequest(cmd *cobra.Command, path string, body any, get bool) error {
+	method := "POST"
+	if get {
+		method = "GET"
+	}
+	return notificationMethodRequest(cmd, path, body, method)
+}
+func notificationMethodRequest(cmd *cobra.Command, path string, body any, method string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -35,8 +61,10 @@ func notificationRequest(cmd *cobra.Command, path string, body any, get bool) er
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 	var out map[string]any
-	if get {
+	if method == "GET" {
 		err = client.GetJSON(ctx, path, &out)
+	} else if method == "PUT" {
+		err = client.PutJSON(ctx, path, body, &out)
 	} else {
 		err = client.PostJSON(ctx, path, body, &out)
 	}
@@ -96,4 +124,24 @@ func runNotificationAck(cmd *cobra.Command, args []string) error {
 		return errors.New("--message is required")
 	}
 	return notificationRequest(cmd, notificationPath(cmd, args[0], "/ack"), map[string]string{"message_id": message}, false)
+}
+
+func runNotificationTopicGet(cmd *cobra.Command, _ []string) error {
+	agent, _ := cmd.Flags().GetString("agent-id")
+	producer, _ := cmd.Flags().GetString("producer")
+	q := url.Values{"agent_id": {agent}, "producer": {producer}}
+	return notificationMethodRequest(cmd, "/api/notification-topics?"+q.Encode(), nil, "GET")
+}
+func runNotificationTopicSet(cmd *cobra.Command, _ []string) error {
+	installation, _ := cmd.Flags().GetString("installation")
+	if installation == "" || !cmd.Flags().Changed("revision") {
+		return errors.New("--installation and --revision are required")
+	}
+	agent, _ := cmd.Flags().GetString("agent-id")
+	producer, _ := cmd.Flags().GetString("producer")
+	revision, _ := cmd.Flags().GetInt64("revision")
+	owner, _ := cmd.Flags().GetString("owner")
+	enabled, _ := cmd.Flags().GetBool("enabled")
+	stopped, _ := cmd.Flags().GetBool("legacy-stopped")
+	return notificationMethodRequest(cmd, "/api/notification-topics", map[string]any{"agent_id": agent, "producer": producer, "installation_id": installation, "expected_revision": revision, "route_owner": owner, "enabled": enabled, "legacy_stopped": stopped}, "PUT")
 }

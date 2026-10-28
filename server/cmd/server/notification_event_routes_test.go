@@ -45,6 +45,8 @@ func TestNotificationEventRoutesAdmitTaskTokenWithBoundScope(t *testing.T) {
 		_ = json.Unmarshal(data, &out)
 		return out
 	}
+	do("PUT", "/api/notification-topics", map[string]any{}, 403)
+	do("GET", "/api/notification-topics?producer=subscription-limits", nil, 200)
 	now := time.Now().UTC()
 	body := service.NotificationEventInput{Producer: "subscription-limits", EventKey: "router", Facts: service.NotificationFacts{Subject: "claude/account/five_hour", Period: "next-reset", Action: "blocked_until_reset", ObservedAt: now.Add(-time.Minute), ResetAt: now.Add(time.Hour), FreshUntil: now.Add(time.Minute), Urgency: "routine"}}
 	out := do("POST", "/api/notification-events", body, 200)

@@ -176,8 +176,8 @@ func TestNotificationEventConcurrentCaptureRetryAndRouteOwner(t *testing.T) {
 		t.Fatalf("collision accepted: %v", err)
 	}
 	f.fx.Exec(t, "UPDATE notification_event SET route_owner='legacy',state='legacy_owned' WHERE id=$1", id)
-	if _, err := f.s.CaptureShadow(ctx, f.w, f.u, f.a, f.in); !errors.Is(err, ErrNotificationConflict) {
-		t.Fatalf("legacy owner stolen: %v", err)
+	if replay, err := f.s.CaptureShadow(ctx, f.w, f.u, f.a, f.in); err != nil || replay.ID != id || replay.RouteOwner != "legacy" {
+		t.Fatalf("legacy retry changed owner: %+v %v", replay, err)
 	}
 	if _, err := f.s.AuthorizeShadow(ctx, f.w, f.u, f.a, id); err == nil {
 		t.Fatal("legacy event authorized by shadow route")

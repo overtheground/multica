@@ -373,9 +373,10 @@ type Handler struct {
 	// composed into the member's private chat; TaskStatusNotifier decides
 	// which results become such notifications. Both nil unless Telegram is
 	// configured — it is the only delivery surface (MUL-11).
-	TelegramNotifications *telegram.NotificationDelivery
-	TaskStatusNotifier    *service.TaskStatusNotifier
-	NotificationEvents    *service.NotificationEventService
+	TelegramNotifications   *telegram.NotificationDelivery
+	TaskStatusNotifier      *service.TaskStatusNotifier
+	NotificationEvents      *service.NotificationEventService
+	NotificationEventWorker *service.NotificationEventWorker
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the

@@ -241,6 +241,24 @@ WITH deleted_wakeup_receipts AS (
 deleted_child_events AS (
  DELETE FROM issue_child_event WHERE workspace_id=$1
 ),
+deleted_notification_event AS (
+ DELETE FROM notification_event WHERE workspace_id=$1
+),
+deleted_notification_awareness AS (
+ DELETE FROM notification_awareness WHERE workspace_id=$1
+),
+deleted_notification_decision_audit AS (
+ DELETE FROM notification_decision_audit WHERE workspace_id=$1
+),
+deleted_notification_outbox AS (
+ DELETE FROM notification_outbox WHERE workspace_id=$1
+),
+deleted_notification_topic_route AS (
+ DELETE FROM notification_topic_route WHERE workspace_id=$1
+),
+deleted_notification_topic_route_audit AS (
+ DELETE FROM notification_topic_route_audit WHERE workspace_id=$1
+),
 deleted_task_status_notification_messages AS (
     DELETE FROM task_status_notification_message
     WHERE notification_id IN (SELECT id FROM task_status_notification WHERE workspace_id = $1)

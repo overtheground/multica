@@ -18,7 +18,7 @@ import (
 )
 
 func TestNotificationDirectOutboxFakeTelegram(t *testing.T) {
-	for _, scenario := range []string{"ack_before_send", "send", "unknown", "rejected", "retry_then_ack", "concurrent_senders", "rollback", "changed_consent", "abandoned", "partial_retry", "ack_during_send"} {
+	for _, scenario := range []string{"ack_before_send", "send", "unknown", "rejected", "retry_then_ack", "concurrent_senders", "rollback", "changed_consent", "abandoned", "partial_retry", "ack_during_send", "partial_unknown"} {
 		t.Run(scenario, func(t *testing.T) {
 			e := newTSNEnv(t)
 			e.inbound("hello", 0)
@@ -62,6 +62,11 @@ func TestNotificationDirectOutboxFakeTelegram(t *testing.T) {
 				ack()
 				want = "suppressed"
 				calls = 0
+			case "partial_unknown":
+				e.fx.Exec(t, "UPDATE chat_message SET content=$2 WHERE id=$1", out.ChatMessageID, strings.Repeat("quota snapshot ", 600))
+				e.bot.script(fakeBotReply{200, ""}, fakeBotReply{503, `{"ok":false,"error_code":503,"description":"lost second chunk"}`})
+				want = "unknown"
+				calls = 1
 			case "unknown":
 				e.bot.script(fakeBotReply{503, `{"ok":false,"error_code":503,"description":"lost result"}`})
 				want = "unknown"

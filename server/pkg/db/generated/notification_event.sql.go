@@ -42,6 +42,38 @@ func (q *Queries) AppendNotificationDecisionAudit(ctx context.Context, arg Appen
 	return err
 }
 
+const appendNotificationTopicRouteAudit = `-- name: AppendNotificationTopicRouteAudit :exec
+INSERT INTO notification_topic_route_audit(id,workspace_id,route_id,actor_user_id,revision,previous_owner,route_owner,enabled,reason)
+VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9)
+`
+
+type AppendNotificationTopicRouteAuditParams struct {
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RouteID       pgtype.UUID `json:"route_id"`
+	ActorUserID   pgtype.UUID `json:"actor_user_id"`
+	Revision      int64       `json:"revision"`
+	PreviousOwner string      `json:"previous_owner"`
+	RouteOwner    string      `json:"route_owner"`
+	Enabled       bool        `json:"enabled"`
+	Reason        string      `json:"reason"`
+}
+
+func (q *Queries) AppendNotificationTopicRouteAudit(ctx context.Context, arg AppendNotificationTopicRouteAuditParams) error {
+	_, err := q.db.Exec(ctx, appendNotificationTopicRouteAudit,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.RouteID,
+		arg.ActorUserID,
+		arg.Revision,
+		arg.PreviousOwner,
+		arg.RouteOwner,
+		arg.Enabled,
+		arg.Reason,
+	)
+	return err
+}
+
 const captureNotificationEvent = `-- name: CaptureNotificationEvent :one
 INSERT INTO notification_event (
  id,workspace_id,user_id,agent_id,producer,event_key,payload,subject,period,action,
@@ -53,7 +85,6 @@ INSERT INTO notification_event (
 ON CONFLICT (workspace_id,user_id,agent_id,producer,event_key)
 DO UPDATE SET event_key=EXCLUDED.event_key
 WHERE notification_event.payload=EXCLUDED.payload
-  AND notification_event.route_owner=EXCLUDED.route_owner
 RETURNING id, workspace_id, user_id, agent_id, producer, event_key, payload, subject, period, action, observed_at, reset_at, fresh_until, urgency, route_owner, state, decision_reason, ack_message_id, retry_at, first_ack_failure_at, revision, created_at, updated_at
 `
 
@@ -117,6 +148,90 @@ func (q *Queries) CaptureNotificationEvent(ctx context.Context, arg CaptureNotif
 		&i.FirstAckFailureAt,
 		&i.Revision,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const countNotificationDirectUnsettled = `-- name: CountNotificationDirectUnsettled :one
+SELECT count(*) FROM notification_outbox o JOIN notification_event e ON e.id=o.event_id AND e.workspace_id=o.workspace_id
+WHERE e.workspace_id= $1 AND e.user_id= $2 AND e.agent_id= $3 AND e.producer= $4
+ AND (o.state IN ('pending','sending','unknown') OR (cardinality(o.message_ids)>0 AND o.state<>'sent'))
+`
+
+type CountNotificationDirectUnsettledParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Producer    string      `json:"producer"`
+}
+
+func (q *Queries) CountNotificationDirectUnsettled(ctx context.Context, arg CountNotificationDirectUnsettledParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotificationDirectUnsettled,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.AgentID,
+		arg.Producer,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countNotificationLegacyInFlight = `-- name: CountNotificationLegacyInFlight :one
+SELECT count(*) FROM task_status_notification WHERE workspace_id= $1 AND user_id= $2 AND agent_id= $3
+ AND state IN ('composing','pending','sending','unknown')
+`
+
+type CountNotificationLegacyInFlightParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+func (q *Queries) CountNotificationLegacyInFlight(ctx context.Context, arg CountNotificationLegacyInFlightParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotificationLegacyInFlight, arg.WorkspaceID, arg.UserID, arg.AgentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createNotificationTopicRoute = `-- name: CreateNotificationTopicRoute :one
+INSERT INTO notification_topic_route(id,workspace_id,user_id,agent_id,producer,installation_id)
+VALUES ( $1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id,user_id,agent_id,producer) DO NOTHING RETURNING id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision, eligible_after, updated_at
+`
+
+type CreateNotificationTopicRouteParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	UserID         pgtype.UUID `json:"user_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	Producer       string      `json:"producer"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+}
+
+func (q *Queries) CreateNotificationTopicRoute(ctx context.Context, arg CreateNotificationTopicRouteParams) (NotificationTopicRoute, error) {
+	row := q.db.QueryRow(ctx, createNotificationTopicRoute,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.AgentID,
+		arg.Producer,
+		arg.InstallationID,
+	)
+	var i NotificationTopicRoute
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.AgentID,
+		&i.Producer,
+		&i.InstallationID,
+		&i.Enabled,
+		&i.RouteOwner,
+		&i.Revision,
+		&i.EligibleAfter,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -296,7 +411,7 @@ func (q *Queries) GetNotificationOutbox(ctx context.Context, arg GetNotification
 }
 
 const getNotificationTopicRoute = `-- name: GetNotificationTopicRoute :one
-SELECT id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision FROM notification_topic_route WHERE workspace_id= $1 AND user_id= $2
+SELECT id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision, eligible_after, updated_at FROM notification_topic_route WHERE workspace_id= $1 AND user_id= $2
  AND agent_id= $3 AND producer= $4 FOR SHARE
 `
 
@@ -325,6 +440,44 @@ func (q *Queries) GetNotificationTopicRoute(ctx context.Context, arg GetNotifica
 		&i.Enabled,
 		&i.RouteOwner,
 		&i.Revision,
+		&i.EligibleAfter,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNotificationTopicRouteForUpdate = `-- name: GetNotificationTopicRouteForUpdate :one
+SELECT id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision, eligible_after, updated_at FROM notification_topic_route WHERE workspace_id= $1 AND user_id= $2
+ AND agent_id= $3 AND producer= $4 FOR UPDATE
+`
+
+type GetNotificationTopicRouteForUpdateParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Producer    string      `json:"producer"`
+}
+
+func (q *Queries) GetNotificationTopicRouteForUpdate(ctx context.Context, arg GetNotificationTopicRouteForUpdateParams) (NotificationTopicRoute, error) {
+	row := q.db.QueryRow(ctx, getNotificationTopicRouteForUpdate,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.AgentID,
+		arg.Producer,
+	)
+	var i NotificationTopicRoute
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.AgentID,
+		&i.Producer,
+		&i.InstallationID,
+		&i.Enabled,
+		&i.RouteOwner,
+		&i.Revision,
+		&i.EligibleAfter,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -408,6 +561,131 @@ func (q *Queries) ListNotificationDecisionAudit(ctx context.Context, arg ListNot
 			&i.EventRevision,
 			&i.Phase,
 			&i.PolicyVersion,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationOutboxDue = `-- name: ListNotificationOutboxDue :many
+SELECT o.workspace_id,o.event_id FROM notification_outbox o JOIN notification_topic_route r
+ON r.id=o.route_id AND r.workspace_id=o.workspace_id AND r.revision=o.route_revision
+WHERE o.state='pending' AND o.next_attempt_at<=clock_timestamp() AND r.enabled AND r.route_owner='direct'
+ORDER BY o.next_attempt_at,o.event_id LIMIT $1
+`
+
+type ListNotificationOutboxDueRow struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EventID     pgtype.UUID `json:"event_id"`
+}
+
+func (q *Queries) ListNotificationOutboxDue(ctx context.Context, batchSize int32) ([]ListNotificationOutboxDueRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationOutboxDue, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationOutboxDueRow{}
+	for rows.Next() {
+		var i ListNotificationOutboxDueRow
+		if err := rows.Scan(&i.WorkspaceID, &i.EventID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationShadowCandidates = `-- name: ListNotificationShadowCandidates :many
+SELECT e.id, e.workspace_id, e.user_id, e.agent_id, e.producer, e.event_key, e.payload, e.subject, e.period, e.action, e.observed_at, e.reset_at, e.fresh_until, e.urgency, e.route_owner, e.state, e.decision_reason, e.ack_message_id, e.retry_at, e.first_ack_failure_at, e.revision, e.created_at, e.updated_at FROM notification_event e JOIN notification_topic_route r
+ON r.workspace_id=e.workspace_id AND r.user_id=e.user_id AND r.agent_id=e.agent_id AND r.producer=e.producer
+WHERE r.enabled AND r.route_owner='direct' AND e.route_owner='shadow'
+ AND e.state IN ('queued','shadow_send','deferred') AND (e.retry_at IS NULL OR e.retry_at<=clock_timestamp())
+ AND e.created_at>=r.eligible_after ORDER BY e.created_at,e.id LIMIT $1
+`
+
+func (q *Queries) ListNotificationShadowCandidates(ctx context.Context, batchSize int32) ([]NotificationEvent, error) {
+	rows, err := q.db.Query(ctx, listNotificationShadowCandidates, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationEvent{}
+	for rows.Next() {
+		var i NotificationEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.AgentID,
+			&i.Producer,
+			&i.EventKey,
+			&i.Payload,
+			&i.Subject,
+			&i.Period,
+			&i.Action,
+			&i.ObservedAt,
+			&i.ResetAt,
+			&i.FreshUntil,
+			&i.Urgency,
+			&i.RouteOwner,
+			&i.State,
+			&i.DecisionReason,
+			&i.AckMessageID,
+			&i.RetryAt,
+			&i.FirstAckFailureAt,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationTopicRouteAudit = `-- name: ListNotificationTopicRouteAudit :many
+SELECT id, workspace_id, route_id, actor_user_id, revision, previous_owner, route_owner, enabled, reason, created_at FROM notification_topic_route_audit WHERE workspace_id= $1 AND route_id= $2
+ORDER BY created_at,id LIMIT 100
+`
+
+type ListNotificationTopicRouteAuditParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RouteID     pgtype.UUID `json:"route_id"`
+}
+
+func (q *Queries) ListNotificationTopicRouteAudit(ctx context.Context, arg ListNotificationTopicRouteAuditParams) ([]NotificationTopicRouteAudit, error) {
+	rows, err := q.db.Query(ctx, listNotificationTopicRouteAudit, arg.WorkspaceID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationTopicRouteAudit{}
+	for rows.Next() {
+		var i NotificationTopicRouteAudit
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RouteID,
+			&i.ActorUserID,
+			&i.Revision,
+			&i.PreviousOwner,
+			&i.RouteOwner,
+			&i.Enabled,
+			&i.Reason,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -651,6 +929,49 @@ func (q *Queries) SetNotificationRouteOwner(ctx context.Context, arg SetNotifica
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateNotificationTopicRoute = `-- name: UpdateNotificationTopicRoute :one
+UPDATE notification_topic_route SET installation_id= $1,enabled= $2,
+ route_owner= $3,eligible_after= $4,revision=revision+1,updated_at=clock_timestamp()
+WHERE workspace_id= $5 AND id= $6 AND revision= $7 RETURNING id, workspace_id, user_id, agent_id, producer, installation_id, enabled, route_owner, revision, eligible_after, updated_at
+`
+
+type UpdateNotificationTopicRouteParams struct {
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	Enabled          bool               `json:"enabled"`
+	RouteOwner       string             `json:"route_owner"`
+	EligibleAfter    pgtype.Timestamptz `json:"eligible_after"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ID               pgtype.UUID        `json:"id"`
+	ExpectedRevision int64              `json:"expected_revision"`
+}
+
+func (q *Queries) UpdateNotificationTopicRoute(ctx context.Context, arg UpdateNotificationTopicRouteParams) (NotificationTopicRoute, error) {
+	row := q.db.QueryRow(ctx, updateNotificationTopicRoute,
+		arg.InstallationID,
+		arg.Enabled,
+		arg.RouteOwner,
+		arg.EligibleAfter,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.ExpectedRevision,
+	)
+	var i NotificationTopicRoute
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.AgentID,
+		&i.Producer,
+		&i.InstallationID,
+		&i.Enabled,
+		&i.RouteOwner,
+		&i.Revision,
+		&i.EligibleAfter,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertNotificationAwareness = `-- name: UpsertNotificationAwareness :one

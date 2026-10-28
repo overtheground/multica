@@ -78,3 +78,42 @@ func TestNotificationCLIRequestsAndBounds(t *testing.T) {
 		t.Fatalf("requests %d", requests)
 	}
 }
+
+func TestNotificationTopicCLIRevisionAndConsentBody(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/api/notification-topics" || r.Method != "PUT" {
+			t.Error("incorrect topic endpoint")
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["expected_revision"] != float64(7) || body["legacy_stopped"] != true || body["enabled"] != true || body["route_owner"] != "direct" {
+			t.Errorf("consent body: %v", body)
+		}
+		if _, exists := body["user_id"]; exists {
+			t.Error("caller selected recipient")
+		}
+		_, _ = w.Write([]byte(`{"revision":8}`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	c := notificationTestCommand()
+	c.Flags().String("installation", "installation", "")
+	c.Flags().Int64("revision", 0, "")
+	c.Flags().String("owner", "direct", "")
+	c.Flags().Bool("enabled", true, "")
+	c.Flags().Bool("legacy-stopped", true, "")
+	c.Flags().String("producer", "subscription-limits", "")
+	if err := runNotificationTopicSet(c, nil); err == nil || calls != 0 {
+		t.Fatal("configuration did not require explicit revision")
+	}
+	_ = c.Flags().Set("revision", "7")
+	if _, err := captureStdout(t, func() error { return runNotificationTopicSet(c, nil) }); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("unexpected retries")
+	}
+}
