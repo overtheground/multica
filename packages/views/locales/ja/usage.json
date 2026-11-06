@@ -107,5 +107,18 @@
   },
   "duration": {
     "less_than_minute": "1分未満"
+  },
+  "breakdown": {
+    "models_title": "モデル",
+    "tasks_title": "上位タスク",
+    "header_model": "モデル",
+    "header_task": "タスク",
+    "input": "入力",
+    "output": "出力",
+    "cache_read": "キャッシュ読取",
+    "cache_write": "キャッシュ書込",
+    "total": "合計",
+    "share": "割合",
+    "no_data": "この期間の使用量はありません。"
   }
 }

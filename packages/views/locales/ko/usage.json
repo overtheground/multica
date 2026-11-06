@@ -107,5 +107,18 @@
   },
   "duration": {
     "less_than_minute": "1분 미만"
+  },
+  "breakdown": {
+    "models_title": "모델",
+    "tasks_title": "상위 작업",
+    "header_model": "모델",
+    "header_task": "작업",
+    "input": "입력",
+    "output": "출력",
+    "cache_read": "캐시 읽기",
+    "cache_write": "캐시 쓰기",
+    "total": "합계",
+    "share": "비중",
+    "no_data": "이 기간의 사용량이 없습니다."
   }
 }

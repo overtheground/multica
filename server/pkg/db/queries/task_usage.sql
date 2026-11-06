@@ -334,3 +334,36 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;
+
+-- name: ListDashboardUsageByIssue :many
+-- Top issues by token spend for the workspace dashboard's "Top tasks" card.
+-- Reads task_usage directly (the hourly rollup has no task/issue dimension),
+-- bounded by the @since cutoff on task_usage.created_at, the same instant the
+-- rollup buckets on. Tasks without an issue (chat, autopilot) have nothing to
+-- link to and are left out. Tasks run by @excluded_agent_ids (agents the
+-- viewer may not see) are dropped so a private agent's work cannot surface as
+-- an issue title. Ranked by total tokens; @row_limit caps the list.
+-- provider/model are not part of the key: the card shows one line per issue.
+SELECT
+    i.id AS issue_id,
+    i.number AS issue_number,
+    i.title AS issue_title,
+    w.issue_prefix AS issue_prefix,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND NOT (atq.agent_id = ANY(@excluded_agent_ids::uuid[]))
+GROUP BY i.id, i.number, i.title, w.issue_prefix
+ORDER BY SUM(tu.input_tokens + tu.output_tokens + tu.cache_read_tokens + tu.cache_write_tokens) DESC, i.id
+LIMIT @row_limit::int;

@@ -15,6 +15,12 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "by-agent", days, projectId, tz] as const,
+  byIssue: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "by-issue", days, projectId, tz] as const,
   agentRuntime: (
     wsId: string,
     days: number,
@@ -104,6 +110,31 @@ export function dashboardUsageByAgentOptions(
     queryKey,
     queryFn: () =>
       api.getDashboardUsageByAgent({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
+    placeholderData: (previousData, previousQuery) =>
+      isSameDashboardScope(previousQuery?.queryKey, queryKey)
+        ? keepPreviousData(previousData)
+        : undefined,
+  });
+}
+
+export function dashboardUsageByIssueOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  const queryKey = dashboardKeys.byIssue(wsId, days, projectId, tz);
+  return queryOptions({
+    queryKey,
+    queryFn: () =>
+      api.getDashboardUsageByIssue({
         days,
         project_id: projectId ?? undefined,
         tz,

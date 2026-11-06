@@ -109,5 +109,18 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "breakdown": {
+    "models_title": "Models",
+    "tasks_title": "Top tasks",
+    "header_model": "Model",
+    "header_task": "Task",
+    "input": "Input",
+    "output": "Output",
+    "cache_read": "Cache read",
+    "cache_write": "Cache write",
+    "total": "Total",
+    "share": "Share",
+    "no_data": "No usage in this window."
   }
 }

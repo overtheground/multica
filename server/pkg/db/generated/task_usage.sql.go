@@ -599,6 +599,98 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardUsageByIssue = `-- name: ListDashboardUsageByIssue :many
+SELECT
+    i.id AS issue_id,
+    i.number AS issue_number,
+    i.title AS issue_title,
+    w.issue_prefix AS issue_prefix,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND NOT (atq.agent_id = ANY($4::uuid[]))
+GROUP BY i.id, i.number, i.title, w.issue_prefix
+ORDER BY SUM(tu.input_tokens + tu.output_tokens + tu.cache_read_tokens + tu.cache_write_tokens) DESC, i.id
+LIMIT $5::int
+`
+
+type ListDashboardUsageByIssueParams struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Since            pgtype.Timestamptz `json:"since"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ExcludedAgentIds []pgtype.UUID      `json:"excluded_agent_ids"`
+	RowLimit         int32              `json:"row_limit"`
+}
+
+type ListDashboardUsageByIssueRow struct {
+	IssueID          pgtype.UUID `json:"issue_id"`
+	IssueNumber      int32       `json:"issue_number"`
+	IssueTitle       string      `json:"issue_title"`
+	IssuePrefix      string      `json:"issue_prefix"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     int64       `json:"cost_usd_ticks"`
+	TaskCount        int32       `json:"task_count"`
+}
+
+// Top issues by token spend for the workspace dashboard's "Top tasks" card.
+// Reads task_usage directly (the hourly rollup has no task/issue dimension),
+// bounded by the @since cutoff on task_usage.created_at, the same instant the
+// rollup buckets on. Tasks without an issue (chat, autopilot) have nothing to
+// link to and are left out. Tasks run by @excluded_agent_ids (agents the
+// viewer may not see) are dropped so a private agent's work cannot surface as
+// an issue title. Ranked by total tokens; @row_limit caps the list.
+// provider/model are not part of the key: the card shows one line per issue.
+func (q *Queries) ListDashboardUsageByIssue(ctx context.Context, arg ListDashboardUsageByIssueParams) ([]ListDashboardUsageByIssueRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByIssue,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.ProjectID,
+		arg.ExcludedAgentIds,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByIssueRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByIssueRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.IssuePrefix,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageDaily = `-- name: ListDashboardUsageDaily :many
 SELECT
     DATE(bucket_hour AT TIME ZONE $2::text) AS date,

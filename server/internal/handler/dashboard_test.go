@@ -1964,3 +1964,122 @@ func TestDashboardMismatchedRequestTimezoneHidesTheRun(t *testing.T) {
 			mismatched, dashboardFixtureTZ)
 	}
 }
+
+// TestDashboardUsageByIssue covers the "Top tasks" ranking: issues are summed
+// across their tasks and ordered by total tokens, the project filter excludes
+// other issues, tasks without an issue are left out, and a malformed
+// project_id is a 400.
+func TestDashboardUsageByIssue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	dbfx.QueryRow(t, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID)
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	projectID := dbfx.Project(t, "by-issue test project")
+
+	mkIssue := func(title string, pid any) string {
+		var id string
+		dbfx.QueryRow(t, `
+			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+			VALUES ($1, $2, $3, 'member', $4,
+				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+			RETURNING id
+		`, testWorkspaceID, title, testUserID, pid).Scan(&id)
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id) })
+		return id
+	}
+	mkUsage := func(issueID any, input, output, cacheRead, cacheWrite int64) {
+		cols := testutil.Cols{"runtime_id": runtimeID, "status": "completed", "created_at": testutil.Raw("now()")}
+		if issueID != nil {
+			cols["issue_id"] = issueID
+		}
+		taskID := dbfx.Task(t, agentID, cols)
+		dbfx.Exec(t, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at)
+			VALUES ($1, 'claude', 'by-issue-model', $2, $3, $4, $5, now())
+		`, taskID, input, output, cacheRead, cacheWrite)
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	}
+
+	bigIssue := mkIssue("by-issue big", projectID)
+	smallIssue := mkIssue("by-issue small", nil)
+	// bigIssue: two tasks summing to 7000 total tokens; smallIssue: 300.
+	mkUsage(bigIssue, 1000, 2000, 3000, 0)
+	mkUsage(bigIssue, 500, 500, 0, 0)
+	mkUsage(smallIssue, 100, 100, 100, 0)
+	// A task with no issue must not appear (and must not break the query).
+	mkUsage(nil, 9_000_000, 0, 0, 0)
+
+	type row struct {
+		IssueID         string `json:"issue_id"`
+		Identifier      string `json:"identifier"`
+		Title           string `json:"title"`
+		InputTokens     int64  `json:"input_tokens"`
+		OutputTokens    int64  `json:"output_tokens"`
+		CacheReadTokens int64  `json:"cache_read_tokens"`
+		TaskCount       int32  `json:"task_count"`
+	}
+	get := func(query string) []row {
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageByIssue(w, newRequest("GET", "/api/dashboard/usage/by-issue?days=1&"+dashboardFixtureTZParam+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("by-issue: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []row
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return rows
+	}
+	find := func(rows []row, id string) (row, int) {
+		for i, r := range rows {
+			if r.IssueID == id {
+				return r, i
+			}
+		}
+		return row{}, -1
+	}
+
+	// workspace-wide: both issues, big ranked above small, sums folded per issue.
+	rows := get("")
+	big, bigAt := find(rows, bigIssue)
+	_, smallAt := find(rows, smallIssue)
+	if bigAt < 0 || smallAt < 0 {
+		t.Fatalf("expected both issues in ranking, got %+v", rows)
+	}
+	if bigAt > smallAt {
+		t.Errorf("expected big issue (7000 tokens) above small (300), got positions %d, %d", bigAt, smallAt)
+	}
+	if big.InputTokens != 1500 || big.OutputTokens != 2500 || big.CacheReadTokens != 3000 || big.TaskCount != 2 {
+		t.Errorf("big issue sums wrong: %+v", big)
+	}
+	if big.Title != "by-issue big" || !strings.Contains(big.Identifier, "-") {
+		t.Errorf("big issue label wrong: %+v", big)
+	}
+	for _, r := range rows {
+		if r.InputTokens == 9_000_000 {
+			t.Errorf("task without an issue leaked into the ranking: %+v", r)
+		}
+	}
+
+	// project-scoped: only the project's issue.
+	rows = get("&project_id=" + projectID)
+	if _, at := find(rows, bigIssue); at < 0 {
+		t.Errorf("project filter dropped the project's issue: %+v", rows)
+	}
+	if _, at := find(rows, smallIssue); at >= 0 {
+		t.Errorf("project filter leaked an issue from outside the project: %+v", rows)
+	}
+
+	// malformed project_id
+	{
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardUsageByIssue(w, newRequest("GET", "/api/dashboard/usage/by-issue?project_id=not-a-uuid", nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for invalid uuid, got %d", w.Code)
+		}
+	}
+}

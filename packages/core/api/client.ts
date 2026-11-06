@@ -80,6 +80,7 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageByIssue,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
@@ -289,6 +290,7 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -2569,6 +2571,22 @@ export class ApiClient {
       DashboardUsageByAgentListSchema,
       [],
       { endpoint: "GET /api/dashboard/usage/by-agent" },
+    );
+  }
+
+  async getDashboardUsageByIssue(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardUsageByIssue[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-issue?${search}`);
+    return parseWithFallback<DashboardUsageByIssue[]>(
+      raw,
+      DashboardUsageByIssueListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-issue" },
     );
   }
 

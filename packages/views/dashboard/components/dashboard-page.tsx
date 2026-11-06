@@ -12,6 +12,7 @@ import {
   NumberFlow,
 } from "@multica/ui/components/ui/number-flow";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -19,6 +20,7 @@ import {
   dashboardKeys,
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
+  dashboardUsageByIssueOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
   dashboardFailuresDailyOptions,
@@ -29,7 +31,7 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { CollectionPageHeader } from "../../layout/collection-page";
 import { KpiCard } from "../../runtimes/components/shared";
-import { useNavigation } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -45,6 +47,7 @@ import {
   aggregateDailyTasks,
   aggregateDailyTime,
   aggregateDailyTokens,
+  aggregateModelTokens,
   aggregateFailureClasses,
   aggregateFailureReasons,
   aggregateWeeklyErrors,
@@ -66,6 +69,7 @@ import {
 import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
+import { TokenBreakdownCard, type TokenBreakdownCardRow } from "./token-breakdown-card";
 import { ErrorsTab } from "./errors-tab";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -73,6 +77,7 @@ import { cn } from "@multica/ui/lib/utils";
 // every render while the query is loading, which breaks useMemo's
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
+const EMPTY_BY_ISSUE: import("@multica/core/types").DashboardUsageByIssue[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
@@ -150,6 +155,7 @@ function useDataFreshness(
 export function DashboardPage() {
   const { t, i18n } = useT("usage");
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
   const viewTZ = useViewingTimezone();
   const navigation = useNavigation();
   const locales = i18n.resolvedLanguage ?? i18n.language;
@@ -218,6 +224,9 @@ export function DashboardPage() {
   const byAgentQuery = useQuery(
     dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
   );
+  const byIssueQuery = useQuery(
+    dashboardUsageByIssueOptions(wsId, days, projectId, viewTZ),
+  );
   const runTimeQuery = useQuery(
     dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
   );
@@ -233,6 +242,7 @@ export function DashboardPage() {
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const byIssueUsage = byIssueQuery.data ?? EMPTY_BY_ISSUE;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
   const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
@@ -245,6 +255,7 @@ export function DashboardPage() {
   const isRefreshing =
     dailyQuery.isFetching ||
     byAgentQuery.isFetching ||
+    byIssueQuery.isFetching ||
     runTimeQuery.isFetching ||
     runTimeDailyQuery.isFetching ||
     failuresDailyQuery.isFetching ||
@@ -312,6 +323,35 @@ export function DashboardPage() {
     () => computeDailyTotals(dailyUsageInWindow),
     [dailyUsageInWindow],
   );
+  const windowTokenTotal =
+    totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
+  const modelRows = useMemo<TokenBreakdownCardRow[]>(
+    () =>
+      aggregateModelTokens(dailyUsageInWindow).map((r) => ({ ...r, label: r.key })),
+    [dailyUsageInWindow],
+  );
+  const issueRows = useMemo<TokenBreakdownCardRow[]>(
+    () =>
+      byIssueUsage
+        .map((r) => ({
+          key: r.issue_id,
+          input: r.input_tokens,
+          output: r.output_tokens,
+          cacheRead: r.cache_read_tokens,
+          cacheWrite: r.cache_write_tokens,
+          label: (
+            <AppLink
+              href={wsPaths.issueDetail(r.issue_id)}
+              newTabTitle={r.title}
+              className="hover:underline"
+            >
+              <span className="text-muted-foreground">{r.identifier}</span> {r.title}
+            </AppLink>
+          ),
+        })),
+    [byIssueUsage, wsPaths],
+  );
+
   const dailyCost = useMemo(
     () => aggregateDailyCost(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -604,6 +644,22 @@ export function DashboardPage() {
                   weeklyTime={weeklyTime}
                   weeklyTasks={weeklyTasks}
                   lessThanMinuteLabel={lessThanMinuteLabel}
+                />
+
+                <TokenBreakdownCard
+                  title={t(($) => $.breakdown.models_title)}
+                  nameHeader={t(($) => $.breakdown.header_model)}
+                  rows={modelRows}
+                  shareTotal={windowTokenTotal}
+                  emptyLabel={t(($) => $.breakdown.no_data)}
+                />
+
+                <TokenBreakdownCard
+                  title={t(($) => $.breakdown.tasks_title)}
+                  nameHeader={t(($) => $.breakdown.header_task)}
+                  rows={issueRows}
+                  shareTotal={windowTokenTotal}
+                  emptyLabel={t(($) => $.breakdown.no_data)}
                 />
 
                 <Leaderboard
