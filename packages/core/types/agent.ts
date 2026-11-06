@@ -1053,6 +1053,20 @@ export interface DashboardUsageByAgent {
   task_count: number;
 }
 
+// Per-issue token totals for the dashboard's "Top tasks" card: every task (and
+// model) that ran on the issue in the window, summed.
+export interface DashboardUsageByIssue {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  task_count: number;
+}
+
 // Per-agent total terminal-task run-time + counts. Powers the workspace
 // dashboard's "time by agent" list. failed_count is a subset of
 // task_count (failed tasks still contribute to total_seconds because

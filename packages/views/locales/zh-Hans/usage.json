@@ -107,5 +107,18 @@
   },
   "duration": {
     "less_than_minute": "<1分钟"
+  },
+  "breakdown": {
+    "models_title": "模型",
+    "tasks_title": "热门任务",
+    "header_model": "模型",
+    "header_task": "任务",
+    "input": "输入",
+    "output": "输出",
+    "cache_read": "缓存读取",
+    "cache_write": "缓存写入",
+    "total": "总计",
+    "share": "占比",
+    "no_data": "此时间段内没有用量。"
   }
 }

@@ -25,6 +25,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
@@ -1175,6 +1176,16 @@ describe("dashboard + runtime usage schema drift", () => {
       { model: "claude-opus-4-7", input_tokens: 7 },
     ]);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("fills defaults for a sparse usage-by-issue row and keeps unknown fields", () => {
+    const parsed = DashboardUsageByIssueListSchema.parse([
+      { issue_id: "i1", title: "T", future_field: 1 },
+    ]);
+    expect(parsed[0]?.identifier).toBe("");
+    expect(parsed[0]?.input_tokens).toBe(0);
+    expect(parsed[0]?.task_count).toBe(0);
+    expect((parsed[0] as Record<string, unknown>).future_field).toBe(1);
   });
 
   it("coerces missing fields on every runtime usage schema", () => {

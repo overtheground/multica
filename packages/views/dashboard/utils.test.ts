@@ -22,6 +22,8 @@ import {
   mergeAgentDashboardRows,
   RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
+  aggregateModelTokens,
+  formatShare,
 } from "./utils";
 
 describe("aggregateDailyCost", () => {
@@ -912,5 +914,35 @@ describe("anonymizeUnresolvedAgentRows", () => {
     const known = new Set(["visible", "private-a", "private-b"]);
     // Same reference, not just equal — nothing needed rewriting.
     expect(anonymizeUnresolvedAgentRows(rows, known)).toBe(rows);
+  });
+});
+
+describe("aggregateModelTokens / formatShare", () => {
+  const row = (model: string, provider: string, input: number, output: number) =>
+    ({
+      date: "2026-05-19",
+      provider,
+      model,
+      input_tokens: input,
+      output_tokens: output,
+      cache_read_tokens: 10,
+      cache_write_tokens: 0,
+      task_count: 1,
+    }) as Parameters<typeof aggregateModelTokens>[0][number];
+
+  it("folds days and providers into one row per model, heaviest first", () => {
+    const rows = aggregateModelTokens([
+      row("small", "a", 1, 1),
+      row("big", "a", 100, 50),
+      row("big", "b", 100, 50),
+    ]);
+    expect(rows.map((r) => r.key)).toEqual(["big", "small"]);
+    expect(rows[0]).toMatchObject({ input: 200, output: 100, cacheRead: 20 });
+  });
+
+  it("formats share and guards a zero total", () => {
+    expect(formatShare(1, 4)).toBe("25%");
+    expect(formatShare(1, 30)).toBe("3.3%");
+    expect(formatShare(5, 0)).toBe("—");
   });
 });

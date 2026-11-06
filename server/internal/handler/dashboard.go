@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -648,4 +649,78 @@ func foldRestrictedFailuresByAgent(
 			return dst
 		},
 	)
+}
+
+// dashboardTopIssuesLimit caps the "Top tasks" card. The list is a ranking, not
+// an export, so the cap is fixed rather than a query parameter.
+const dashboardTopIssuesLimit = 20
+
+// DashboardUsageByIssueResponse is one issue's token spend over the window,
+// summed across every task (and model) that ran on it.
+type DashboardUsageByIssueResponse struct {
+	IssueID          string `json:"issue_id"`
+	Identifier       string `json:"identifier"`
+	Title            string `json:"title"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CostUSDTicks     int64  `json:"cost_usd_ticks"`
+	TaskCount        int32  `json:"task_count"`
+}
+
+// GetDashboardUsageByIssue returns the top issues by token spend for the
+// workspace, optionally scoped to a project. Runs of agents the viewer cannot
+// see are excluded (they are folded into an anonymous bucket elsewhere, but an
+// issue title has no such anonymous form). Same `?days=` window as by-agent.
+func (h *Handler) GetDashboardUsageByIssue(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	restricted, ok := h.dashboardRestrictedAgents(w, r, workspaceID, member.Role)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	excluded := make([]pgtype.UUID, 0, len(restricted))
+	for id := range restricted {
+		if u, err := util.ParseUUID(id); err == nil {
+			excluded = append(excluded, u)
+		}
+	}
+
+	rows, err := h.Queries.ListDashboardUsageByIssue(r.Context(), db.ListDashboardUsageByIssueParams{
+		WorkspaceID:      parseUUID(workspaceID),
+		Since:            since,
+		ProjectID:        projectID,
+		ExcludedAgentIds: excluded,
+		RowLimit:         dashboardTopIssuesLimit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list usage by issue")
+		return
+	}
+	resp := make([]DashboardUsageByIssueResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardUsageByIssueResponse{
+			IssueID:          uuidToString(row.IssueID),
+			Identifier:       fmt.Sprintf("%s-%d", row.IssuePrefix, row.IssueNumber),
+			Title:            row.IssueTitle,
+			InputTokens:      row.InputTokens,
+			OutputTokens:     row.OutputTokens,
+			CacheReadTokens:  row.CacheReadTokens,
+			CacheWriteTokens: row.CacheWriteTokens,
+			CostUSDTicks:     row.CostUsdTicks,
+			TaskCount:        row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

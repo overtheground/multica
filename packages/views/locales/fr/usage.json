@@ -109,5 +109,18 @@
   },
   "duration": {
     "less_than_minute": "<1 min"
+  },
+  "breakdown": {
+    "models_title": "Modèles",
+    "tasks_title": "Tâches principales",
+    "header_model": "Modèle",
+    "header_task": "Tâche",
+    "input": "Entrée",
+    "output": "Sortie",
+    "cache_read": "Lecture cache",
+    "cache_write": "Écriture cache",
+    "total": "Total",
+    "share": "Part",
+    "no_data": "Aucune utilisation sur cette période."
   }
 }

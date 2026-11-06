@@ -811,3 +811,41 @@ export function anonymizeUnresolvedAgentRows(
       : { ...r, agent_id: UNRESOLVED_AGENTS_ROW_ID },
   );
 }
+
+export interface TokenBreakdownRow {
+  key: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export function tokenBreakdownTotal(r: TokenBreakdownRow): number {
+  return r.input + r.output + r.cacheRead + r.cacheWrite;
+}
+
+// Fold the per-(date, provider, model) rows into one row per model for the
+// "Models" card, heaviest first. Provider is dropped on purpose: the card
+// answers "which model", and a model served by two providers is one line.
+export function aggregateModelTokens(usage: DashboardUsageDaily[]): TokenBreakdownRow[] {
+  const map = new Map<string, TokenBreakdownRow>();
+  for (const u of usage) {
+    const key = u.model || "unknown";
+    const row = map.get(key) ?? { key, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    row.input += u.input_tokens;
+    row.output += u.output_tokens;
+    row.cacheRead += u.cache_read_tokens;
+    row.cacheWrite += u.cache_write_tokens;
+    map.set(key, row);
+  }
+  return Array.from(map.values()).toSorted(
+    (a, b) => tokenBreakdownTotal(b) - tokenBreakdownTotal(a),
+  );
+}
+
+// Share of the window total, as a whole-number-or-one-decimal percent string.
+export function formatShare(part: number, total: number): string {
+  if (total <= 0) return "—";
+  const pct = (part / total) * 100;
+  return `${pct >= 10 ? pct.toFixed(0) : pct.toFixed(1)}%`;
+}

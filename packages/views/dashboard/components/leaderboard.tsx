@@ -8,6 +8,7 @@ import { useT } from "../../i18n";
 import {
   DELETED_AGENTS_ROW_ID,
   formatDuration,
+  formatShare,
   isSyntheticAgentRow,
   RESTRICTED_AGENTS_ROW_ID,
   type AgentDashboardRow,
@@ -43,7 +44,7 @@ const LEADERBOARD_LIMIT = 10;
 const LEADERBOARD_GRID_STYLE = {
   minWidth: "fit-content",
   gridTemplateColumns:
-    "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
+    "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 4rem 5rem 5rem 4rem",
 } satisfies CSSProperties;
 
 const LEADERBOARD_GRID = "grid items-center gap-3";
@@ -88,6 +89,13 @@ export function Leaderboard({
     const metric = SORT_METRIC[sortBy];
     return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
   }, [sortedRows, sortBy]);
+
+  // Share is of the sum over every row, so it reads the same collapsed and
+  // expanded; rows without usage totals contribute nothing.
+  const tokenSum = useMemo(
+    () => rows.reduce((sum, r) => sum + (r.hasUsageTotals ? r.tokens : 0), 0),
+    [rows],
+  );
 
   const visibleRows = showAll
     ? sortedRows
@@ -178,6 +186,9 @@ export function Leaderboard({
               <span />
               <span className={colClass("tokens")}>
                 {t(($) => $.leaderboard.header_tokens)}
+              </span>
+              <span className="text-right text-muted-foreground">
+                {t(($) => $.breakdown.share)}
               </span>
               <span className={colClass("cost")}>
                 {t(($) => $.leaderboard.header_cost)}
@@ -296,6 +307,9 @@ export function Leaderboard({
                       className={`text-right text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
                       {tokenText}
+                    </div>
+                    <div className="text-right text-caption tabular-nums text-muted-foreground">
+                      {usageUnavailable ? "—" : formatShare(row.tokens, tokenSum)}
                     </div>
                     <div
                       className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}

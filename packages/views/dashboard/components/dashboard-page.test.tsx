@@ -408,7 +408,7 @@ describe("DashboardPage — unreported usage", () => {
     const row = list.getAllByRole("listitem")[0] as HTMLElement;
     expect(row).toHaveTextContent("Agent One");
     expect(row).toHaveTextContent("12 runs did not report usage");
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText("—")).toHaveLength(3);
     expect(row).toHaveTextContent("3h 17m");
     expect(row).toHaveTextContent("12");
   });
@@ -421,7 +421,7 @@ describe("DashboardPage — unreported usage", () => {
     const row = list.getAllByRole("listitem")[0] as HTMLElement;
     expect(row).toHaveTextContent("Usage totals are still being processed");
     expect(row).not.toHaveTextContent("did not report usage");
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText("—")).toHaveLength(3);
   });
 
   it("keeps old-server coverage unknown without claiming unreported usage", () => {
@@ -432,7 +432,7 @@ describe("DashboardPage — unreported usage", () => {
     const row = list.getAllByRole("listitem")[0] as HTMLElement;
     expect(row).not.toHaveTextContent("did not report usage");
     expect(row).not.toHaveTextContent("still being processed");
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText("—")).toHaveLength(3);
   });
 
   it("shows both missing coverage and delayed totals", () => {
@@ -448,7 +448,7 @@ describe("DashboardPage — unreported usage", () => {
       "title",
       coverageText,
     );
-    expect(within(row).getAllByText("—")).toHaveLength(2);
+    expect(within(row).getAllByText("—")).toHaveLength(3);
   });
 });
 
@@ -851,7 +851,7 @@ describe("DashboardPage — leaderboard density", () => {
     expect(row).toHaveStyle({
       minWidth: "fit-content",
       gridTemplateColumns:
-        "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
+        "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 4rem 5rem 5rem 4rem",
     });
   });
 });
