@@ -8,15 +8,20 @@
   "filter": {
     "project_label": "プロジェクト",
     "all_projects": "すべてのプロジェクト",
+    "range_days": "{{n}}日",
+    "range_hours": "{{n}}時間",
+    "custom_period": "カスタム期間",
+    "custom_days_placeholder": "日数（1〜180）",
+    "custom_apply": "適用",
     "period_label": "期間"
   },
   "kpi": {
-    "cost_label": "コスト · {{days}}日",
-    "tokens_label": "トークン · {{days}}日",
+    "cost_label": "コスト · {{range}}",
+    "tokens_label": "トークン · {{range}}",
     "tokens_hint": "入力 {{input}} · 出力 {{output}}",
-    "run_time_label": "実行時間 · {{days}}日",
+    "run_time_label": "実行時間 · {{range}}",
     "run_time_hint": "{{tasks}} 件の実行全体",
-    "tasks_label": "実行 · {{days}}日",
+    "tasks_label": "実行 · {{range}}",
     "tasks_hint": "{{failed}} 件失敗"
   },
   "dim": {
@@ -46,10 +51,10 @@
     "partial_label": "{{range}} (一部 · 7日中 {{covered}}日)"
   },
   "errors": {
-    "kpi_failed_label": "失敗した実行 · {{days}}日",
+    "kpi_failed_label": "失敗した実行 · {{range}}",
     "kpi_failed_hint": "{{total}} 回の実行中",
-    "kpi_rate_label": "失敗率 · {{days}}日",
-    "kpi_agents_label": "影響を受けたエージェント · {{days}}日",
+    "kpi_rate_label": "失敗率 · {{range}}",
+    "kpi_agents_label": "影響を受けたエージェント · {{range}}",
     "kpi_agents_hint": "最多 {{name}} · {{count}} 回",
     "tooltip_rate": "エラー率",
     "class": {

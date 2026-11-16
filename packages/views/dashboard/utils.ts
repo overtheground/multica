@@ -54,7 +54,16 @@ export interface DailyCostStack {
   total: number;
 }
 
+// Chart bucket key of a date-bucketed row: the date, or `date + hour` for the
+// rolling 24h window where the server splits every day per hour. ISO-shaped
+// either way, so keys sort chronologically as plain strings.
+export function bucketKey(r: { date: string; hour?: number }): string {
+  return r.hour == null ? r.date : `${r.date}T${String(r.hour).padStart(2, "0")}`;
+}
+
 function formatDateLabel(d: string): string {
+  // Hourly bucket key ("2026-11-16T09") → the hour axis label.
+  if (d.length > 10 && d[10] === "T") return `${d.slice(11, 13)}:00`;
   // Anchor to local midnight so the formatted label matches the bucket the
   // server picked (which is already in workspace time). Pasting the raw
   // date as the body of `new Date()` would interpret it as UTC and shift
@@ -73,7 +82,8 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
   >();
   for (const u of usage) {
     const b = estimateCostBreakdown(u);
-    const entry = map.get(u.date) ?? {
+    const key = bucketKey(u);
+    const entry = map.get(key) ?? {
       input: 0,
       output: 0,
       cacheRead: 0,
@@ -83,7 +93,7 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     entry.output += b.output;
     entry.cacheRead += b.cacheRead;
     entry.cacheWrite += b.cacheWrite;
-    map.set(u.date, entry);
+    map.set(key, entry);
   }
   const round = (n: number) => Math.round(n * 100) / 100;
   return Array.from(map.entries())
@@ -117,7 +127,8 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     { input: number; output: number; cacheRead: number; cacheWrite: number }
   >();
   for (const u of usage) {
-    const entry = map.get(u.date) ?? {
+    const key = bucketKey(u);
+    const entry = map.get(key) ?? {
       input: 0,
       output: 0,
       cacheRead: 0,
@@ -127,7 +138,7 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     entry.output += u.output_tokens;
     entry.cacheRead += u.cache_read_tokens;
     entry.cacheWrite += u.cache_write_tokens;
-    map.set(u.date, entry);
+    map.set(key, entry);
   }
   return Array.from(map.entries())
     .toSorted(([a], [b]) => a.localeCompare(b))
@@ -467,10 +478,10 @@ export function aggregateWeeklyTasks(
 // DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
 // matching the cost / tokens aggregators.
 export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
-  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => bucketKey(a).localeCompare(bucketKey(b)))
     .map((r) => ({
-      date: r.date,
-      label: formatDateLabel(r.date),
+      date: bucketKey(r),
+      label: formatDateLabel(bucketKey(r)),
       totalSeconds: r.total_seconds,
     }));
 }
@@ -481,14 +492,14 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
 // is the remainder. Subtracting cancelled matters: without it a run the user
 // stopped would render in the green "completed" segment.
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
-  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => bucketKey(a).localeCompare(bucketKey(b)))
     .map((r) => {
       const failed = r.failed_count;
       const cancelled = r.cancelled_count;
       const completed = Math.max(0, r.task_count - failed - cancelled);
       return {
-        date: r.date,
-        label: formatDateLabel(r.date),
+        date: bucketKey(r),
+        label: formatDateLabel(bucketKey(r)),
         completed,
         failed,
         cancelled,
@@ -562,10 +573,11 @@ export function aggregateDailyErrors(
 ): DailyErrorsData[] {
   const map = new Map<string, FailureClassCounts & FailureBucketTotals>();
   for (const r of rows) {
-    let entry = map.get(r.date);
+    const key = bucketKey(r);
+    let entry = map.get(key);
     if (!entry) {
       entry = { ...emptyClassCounts(), failed: 0, total: 0 };
-      map.set(r.date, entry);
+      map.set(key, entry);
     }
     foldFailureRow(entry, r.failure_reason, r.task_count);
   }

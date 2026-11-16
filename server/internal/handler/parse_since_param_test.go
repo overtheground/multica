@@ -166,3 +166,86 @@ func TestParseSinceParamInTZ(t *testing.T) {
 		})
 	}
 }
+
+// TestSinceFromHours pins the rolling-window cutoff: N hourly buckets ending
+// at the current (partial) UTC hour, whatever zone `now` is expressed in.
+func TestSinceFromHours(t *testing.T) {
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load tz: %v", err)
+	}
+	cases := []struct {
+		name  string
+		now   time.Time
+		hours int
+		want  time.Time
+	}{
+		{"24h mid-hour", time.Date(2026, 11, 16, 13, 41, 7, 0, time.UTC), 24, time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC)},
+		{"1h is just the current hour", time.Date(2026, 11, 16, 13, 41, 0, 0, time.UTC), 1, time.Date(2026, 11, 16, 13, 0, 0, 0, time.UTC)},
+		{"crosses midnight", time.Date(2026, 11, 16, 2, 5, 0, 0, time.UTC), 24, time.Date(2026, 11, 15, 3, 0, 0, 0, time.UTC)},
+		{"viewer zone does not move the edge", time.Date(2026, 11, 16, 21, 41, 0, 0, shanghai), 24, time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		if got := sinceFromHours(c.now, c.hours); !got.Equal(c.want) {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestHoursParam(t *testing.T) {
+	cases := []struct {
+		query  string
+		want   int
+		wantOK bool
+	}{
+		{"", 0, false},
+		{"hours=24", 24, true},
+		{"hours=1", 1, true},
+		{"hours=48", 48, true},
+		{"hours=49", 0, false},
+		{"hours=0", 0, false},
+		{"hours=-3", 0, false},
+		{"hours=abc", 0, false},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/api/dashboard/usage/daily?"+c.query, nil)
+		got, ok := hoursParam(r)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("%q: got (%d,%v), want (%d,%v)", c.query, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+// With ?hours the dashboard cutoff is the rolling window for both the N+1 and
+// exact variants; without it the calendar ?days cutoff is untouched.
+func TestDashboardSince(t *testing.T) {
+	fixed := time.Date(2026, 11, 16, 13, 41, 0, 0, time.UTC)
+	prev := dayWindowNow
+	dayWindowNow = func() time.Time { return fixed }
+	t.Cleanup(func() { dayWindowNow = prev })
+
+	hourly := httptest.NewRequest("GET", "/x?hours=24&days=7", nil)
+	want := time.Date(2026, 11, 15, 14, 0, 0, 0, time.UTC)
+	for _, exact := range []bool{false, true} {
+		if got := dashboardSince(hourly, 30, "UTC", exact).Time; !got.Equal(want) {
+			t.Errorf("hours exact=%v: got %s, want %s", exact, got, want)
+		}
+	}
+
+	daily := httptest.NewRequest("GET", "/x?days=1", nil)
+	if got := dashboardSince(daily, 30, "UTC", true).Time; !got.Equal(time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("days=1 exact: got %s, want today's midnight", got)
+	}
+	if got := dashboardSince(daily, 30, "UTC", false).Time; !got.Equal(time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("days=1 N+1: got %s, want yesterday's midnight", got)
+	}
+}
+
+func TestBucketHour(t *testing.T) {
+	if bucketHour(-1) != nil {
+		t.Error("-1 must map to nil")
+	}
+	if p := bucketHour(0); p == nil || *p != 0 {
+		t.Error("0 must map to a pointer to 0")
+	}
+}

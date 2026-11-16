@@ -1835,6 +1835,7 @@ const CostSplitShape = {
 
 const DashboardUsageDailySchema = z.object({
   date: z.string().default(""),
+  hour: z.number().optional(),
   provider: z.string().default(""),
   model: z.string().default(""),
   input_tokens: z.number().default(0),
@@ -1891,6 +1892,7 @@ export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSche
 
 const DashboardRunTimeDailySchema = z.object({
   date: z.string().default(""),
+  hour: z.number().optional(),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
@@ -1909,6 +1911,7 @@ export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySche
 // denominator rather than inventing a failure that never happened.
 const DashboardFailureDailySchema = z.object({
   date: z.string().default(""),
+  hour: z.number().optional(),
   failure_reason: z.string().default(""),
   task_count: z.number().default(0),
 }).loose();

@@ -8,15 +8,20 @@
   "filter": {
     "project_label": "项目",
     "all_projects": "全部项目",
+    "range_days": "{{n}}天",
+    "range_hours": "{{n}}小时",
+    "custom_period": "自定义时间范围",
+    "custom_days_placeholder": "天数（1–180）",
+    "custom_apply": "应用",
     "period_label": "时间范围"
   },
   "kpi": {
-    "cost_label": "费用 · {{days}}天",
-    "tokens_label": "Token · {{days}}天",
+    "cost_label": "费用 · {{range}}",
+    "tokens_label": "Token · {{range}}",
     "tokens_hint": "输入 {{input}} · 输出 {{output}}",
-    "run_time_label": "耗时 · {{days}}天",
+    "run_time_label": "耗时 · {{range}}",
     "run_time_hint": "共 {{tasks}} 次运行",
-    "tasks_label": "运行数 · {{days}}天",
+    "tasks_label": "运行数 · {{range}}",
     "tasks_hint": "失败 {{failed}} 个"
   },
   "dim": {
@@ -46,10 +51,10 @@
     "partial_label": "{{range}}（未满 · 已过 {{covered}} / 7 天）"
   },
   "errors": {
-    "kpi_failed_label": "失败运行 · {{days}}天",
+    "kpi_failed_label": "失败运行 · {{range}}",
     "kpi_failed_hint": "共 {{total}} 次运行",
-    "kpi_rate_label": "失败率 · {{days}}天",
-    "kpi_agents_label": "受影响智能体 · {{days}}天",
+    "kpi_rate_label": "失败率 · {{range}}",
+    "kpi_agents_label": "受影响智能体 · {{range}}",
     "kpi_agents_hint": "最多 {{name}} · {{count}} 次",
     "tooltip_rate": "错误率",
     "class": {

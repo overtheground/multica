@@ -340,6 +340,7 @@ func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDash
 const listDashboardFailuresDaily = `-- name: ListDashboardFailuresDaily :many
 SELECT
     DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
+    (CASE WHEN $3::bool THEN EXTRACT(HOUR FROM atq.completed_at AT TIME ZONE $2::text)::int ELSE -1 END)::int AS hour,
     CASE
         WHEN atq.status = 'failed'
             THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
@@ -352,21 +353,23 @@ LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND atq.status IN ('completed', 'failed')
   AND atq.completed_at IS NOT NULL
-  AND atq.completed_at >= $3::timestamptz
-  AND ($4::uuid IS NULL OR i.project_id = $4)
-GROUP BY 1, 2
-ORDER BY 1 DESC, 2
+  AND atq.completed_at >= $4::timestamptz
+  AND ($5::uuid IS NULL OR i.project_id = $5)
+GROUP BY 1, 2, 3
+ORDER BY 1 DESC, 2 DESC, 3
 `
 
 type ListDashboardFailuresDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Tz          string             `json:"tz"`
+	Hourly      bool               `json:"hourly"`
 	Since       pgtype.Timestamptz `json:"since"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardFailuresDailyRow struct {
 	Date          pgtype.Date `json:"date"`
+	Hour          int32       `json:"hour"`
 	FailureReason string      `json:"failure_reason"`
 	TaskCount     int32       `json:"task_count"`
 }
@@ -396,6 +399,7 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 	rows, err := q.db.Query(ctx, listDashboardFailuresDaily,
 		arg.WorkspaceID,
 		arg.Tz,
+		arg.Hourly,
 		arg.Since,
 		arg.ProjectID,
 	)
@@ -406,7 +410,12 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 	items := []ListDashboardFailuresDailyRow{}
 	for rows.Next() {
 		var i ListDashboardFailuresDailyRow
-		if err := rows.Scan(&i.Date, &i.FailureReason, &i.TaskCount); err != nil {
+		if err := rows.Scan(
+			&i.Date,
+			&i.Hour,
+			&i.FailureReason,
+			&i.TaskCount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -420,6 +429,7 @@ func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashbo
 const listDashboardRunTimeDaily = `-- name: ListDashboardRunTimeDaily :many
 SELECT
     DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
+    (CASE WHEN $3::bool THEN EXTRACT(HOUR FROM atq.completed_at AT TIME ZONE $2::text)::int ELSE -1 END)::int AS hour,
     COALESCE(
         SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
         0
@@ -434,21 +444,23 @@ WHERE a.workspace_id = $1
   AND atq.status IN ('completed', 'failed', 'cancelled')
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
-  AND atq.completed_at >= $3::timestamptz
-  AND ($4::uuid IS NULL OR i.project_id = $4)
-GROUP BY DATE(atq.completed_at AT TIME ZONE $2::text)
-ORDER BY DATE(atq.completed_at AT TIME ZONE $2::text) DESC
+  AND atq.completed_at >= $4::timestamptz
+  AND ($5::uuid IS NULL OR i.project_id = $5)
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2 DESC
 `
 
 type ListDashboardRunTimeDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Tz          string             `json:"tz"`
+	Hourly      bool               `json:"hourly"`
 	Since       pgtype.Timestamptz `json:"since"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardRunTimeDailyRow struct {
 	Date           pgtype.Date `json:"date"`
+	Hour           int32       `json:"hour"`
 	TotalSeconds   int64       `json:"total_seconds"`
 	TaskCount      int32       `json:"task_count"`
 	FailedCount    int32       `json:"failed_count"`
@@ -479,6 +491,7 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 	rows, err := q.db.Query(ctx, listDashboardRunTimeDaily,
 		arg.WorkspaceID,
 		arg.Tz,
+		arg.Hourly,
 		arg.Since,
 		arg.ProjectID,
 	)
@@ -491,6 +504,7 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 		var i ListDashboardRunTimeDailyRow
 		if err := rows.Scan(
 			&i.Date,
+			&i.Hour,
 			&i.TotalSeconds,
 			&i.TaskCount,
 			&i.FailedCount,
@@ -694,6 +708,7 @@ func (q *Queries) ListDashboardUsageByIssue(ctx context.Context, arg ListDashboa
 const listDashboardUsageDaily = `-- name: ListDashboardUsageDaily :many
 SELECT
     DATE(bucket_hour AT TIME ZONE $2::text) AS date,
+    (CASE WHEN $3::bool THEN EXTRACT(HOUR FROM bucket_hour AT TIME ZONE $2::text)::int ELSE -1 END)::int AS hour,
     LOWER(provider) AS provider,
     model,
     SUM(input_tokens)::bigint        AS input_tokens,
@@ -708,21 +723,23 @@ SELECT
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
-  AND bucket_hour >= $3::timestamptz
-  AND ($4::uuid IS NULL OR project_id = $4)
-GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), LOWER(provider), model
-ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, LOWER(provider), model
+  AND bucket_hour >= $4::timestamptz
+  AND ($5::uuid IS NULL OR project_id = $5)
+GROUP BY 1, 2, LOWER(provider), model
+ORDER BY 1 DESC, 2 DESC, LOWER(provider), model
 `
 
 type ListDashboardUsageDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Tz          string             `json:"tz"`
+	Hourly      bool               `json:"hourly"`
 	Since       pgtype.Timestamptz `json:"since"`
 	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type ListDashboardUsageDailyRow struct {
 	Date                     pgtype.Date `json:"date"`
+	Hour                     int32       `json:"hour"`
 	Provider                 string      `json:"provider"`
 	Model                    string      `json:"model"`
 	InputTokens              int64       `json:"input_tokens"`
@@ -758,6 +775,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 	rows, err := q.db.Query(ctx, listDashboardUsageDaily,
 		arg.WorkspaceID,
 		arg.Tz,
+		arg.Hourly,
 		arg.Since,
 		arg.ProjectID,
 	)
@@ -770,6 +788,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 		var i ListDashboardUsageDailyRow
 		if err := rows.Scan(
 			&i.Date,
+			&i.Hour,
 			&i.Provider,
 			&i.Model,
 			&i.InputTokens,

@@ -8,15 +8,20 @@
   "filter": {
     "project_label": "Projet",
     "all_projects": "Tous les projets",
+    "range_days": "{{n}} j",
+    "range_hours": "{{n}} h",
+    "custom_period": "Période personnalisée",
+    "custom_days_placeholder": "Nombre de jours (1–180)",
+    "custom_apply": "Appliquer",
     "period_label": "Période"
   },
   "kpi": {
-    "cost_label": "Coût · {{days}} j",
-    "tokens_label": "Tokens · {{days}} j",
+    "cost_label": "Coût · {{range}}",
+    "tokens_label": "Tokens · {{range}}",
     "tokens_hint": "Entrée {{input}} · Sortie {{output}}",
-    "run_time_label": "Temps d'exécution · {{days}} j",
+    "run_time_label": "Temps d'exécution · {{range}}",
     "run_time_hint": "Sur {{tasks}} exécutions",
-    "tasks_label": "Exécutions · {{days}} j",
+    "tasks_label": "Exécutions · {{range}}",
     "tasks_hint": "{{failed}} en échec"
   },
   "dim": {
@@ -46,10 +51,10 @@
     "partial_label": "{{range}} (partiel · {{covered}} / 7 jours)"
   },
   "errors": {
-    "kpi_failed_label": "Exécutions en échec · {{days}} j",
+    "kpi_failed_label": "Exécutions en échec · {{range}}",
     "kpi_failed_hint": "Sur {{total}} exécutions",
-    "kpi_rate_label": "Taux d'échec · {{days}} j",
-    "kpi_agents_label": "Agents touchés · {{days}} j",
+    "kpi_rate_label": "Taux d'échec · {{range}}",
+    "kpi_agents_label": "Agents touchés · {{range}}",
     "kpi_agents_hint": "Pire : {{name}} · {{count}}",
     "tooltip_rate": "Taux d'erreur",
     "class": {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider } from "../../navigation";
@@ -853,5 +853,64 @@ describe("DashboardPage — leaderboard density", () => {
       gridTemplateColumns:
         "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 4rem 5rem 5rem 4rem",
     });
+  });
+});
+
+describe("DashboardPage — period filter", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  // The day count is the 4th segment of every dashboard key.
+  const daySegments = () =>
+    new Set(queryKeys.filter((k) => k[0] === "dashboard").map((k) => k[3]));
+
+  // The page re-renders as data lands and can close a menu that is still
+  // opening; reopen until the content shows.
+  async function openPeriodMenu(content: () => HTMLElement) {
+    await waitFor(() => {
+      const trigger = screen.getByRole("button", { name: "Period" });
+      if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+      expect(content()).toBeInTheDocument();
+    }, { timeout: 5000 });
+  }
+
+  it("offers the rolling 24 hours instead of a calendar 1d preset", async () => {
+    renderDashboard();
+    await openPeriodMenu(() => screen.getByRole("menuitemradio", { name: "24H" }));
+    expect(screen.queryByRole("menuitemradio", { name: "1D" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "30D" })).toBeInTheDocument();
+  });
+
+  it("scopes every query to a custom number of days", async () => {
+    renderDashboard();
+    await openPeriodMenu(() => screen.getByRole("spinbutton", { name: "Custom period" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom period" }), {
+      target: { value: "3" },
+    });
+
+    queryKeys.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Period" })).toHaveTextContent("3D"),
+    );
+    // 3 days over-fetches the daily series to a full week; the per-agent
+    // rollups stay on exactly 3.
+    expect(daySegments()).toEqual(new Set([3, 7]));
+  });
+
+  it("switches to the rolling 24 hours and labels the KPIs 24H", async () => {
+    const { container } = renderDashboard();
+    await openPeriodMenu(() => screen.getByRole("menuitemradio", { name: "24H" }));
+    queryKeys.length = 0;
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "24H" }));
+
+    await waitFor(() => expect(container).toHaveTextContent("Cost · 24H"));
+    // No weekly over-fetch for the rolling day: every query is on 1.
+    expect(daySegments()).toEqual(new Set([1]));
   });
 });

@@ -546,6 +546,16 @@ export interface LoginResponse {
   user: User;
 }
 
+// The dashboard reads a one-day range as the rolling last 24 hours, not the
+// calendar day: the server splits the date-bucketed series per hour for
+// `hours=N` and closes the per-agent windows on the same hour edge.
+export const DASHBOARD_ROLLING_DAY_HOURS = 24;
+
+function setDashboardWindow(search: URLSearchParams, days: number | undefined) {
+  if (days === 1) search.set("hours", String(DASHBOARD_ROLLING_DAY_HOURS));
+  else if (days) search.set("days", String(days));
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
@@ -2546,7 +2556,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
@@ -2562,7 +2572,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
@@ -2578,7 +2588,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByIssue[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-issue?${search}`);
@@ -2594,7 +2604,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     // `tz` aligns the "last N days" cutoff with the viewer's calendar,
     // matching the per-agent token card.
@@ -2612,7 +2622,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
     // align with the Cost / Tokens charts.
@@ -2630,7 +2640,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardFailureDaily[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     // `tz` cuts the day buckets in the viewer's calendar so the Errors chart
     // shares an x-axis with the other four metrics.
@@ -2648,7 +2658,7 @@ export class ApiClient {
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardFailureByAgent[]> {
     const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
+    setDashboardWindow(search, params.days);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/failures/by-agent?${search}`);

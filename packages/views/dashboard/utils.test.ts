@@ -23,6 +23,9 @@ import {
   RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
   aggregateModelTokens,
+  aggregateDailyTokens,
+  aggregateDailyTime,
+  bucketKey,
   formatShare,
 } from "./utils";
 
@@ -944,5 +947,62 @@ describe("aggregateModelTokens / formatShare", () => {
     expect(formatShare(1, 4)).toBe("25%");
     expect(formatShare(1, 30)).toBe("3.3%");
     expect(formatShare(5, 0)).toBe("—");
+  });
+});
+
+describe("rolling 24h hourly buckets", () => {
+  const usage = (date: string, hour: number | undefined, input: number) => ({
+    date,
+    hour,
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    input_tokens: input,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    task_count: 1,
+  });
+
+  it("keys a row by date alone, or date and hour when split per hour", () => {
+    expect(bucketKey({ date: "2026-11-16" })).toBe("2026-11-16");
+    expect(bucketKey({ date: "2026-11-16", hour: 9 })).toBe("2026-11-16T09");
+  });
+
+  it("keeps hours of the same date apart and orders them across midnight", () => {
+    const result = aggregateDailyTokens([
+      usage("2026-11-16", 1, 10),
+      usage("2026-11-15", 23, 5),
+      usage("2026-11-16", 1, 7),
+      usage("2026-11-15", 22, 3),
+    ]);
+    expect(result.map((r) => r.date)).toEqual([
+      "2026-11-15T22",
+      "2026-11-15T23",
+      "2026-11-16T01",
+    ]);
+    expect(result.map((r) => r.input)).toEqual([3, 5, 17]);
+    expect(result.map((r) => r.label)).toEqual(["22:00", "23:00", "01:00"]);
+  });
+
+  it("labels date-only rows as before", () => {
+    const [row] = aggregateDailyTokens([usage("2026-05-10", undefined, 1)]);
+    expect(row?.label).toBe("5/10");
+  });
+
+  it("orders hourly run-time and task rows across midnight too", () => {
+    const rows = [
+      { date: "2026-11-16", hour: 0, total_seconds: 60, task_count: 1, failed_count: 0, cancelled_count: 0 },
+      { date: "2026-11-15", hour: 23, total_seconds: 30, task_count: 2, failed_count: 1, cancelled_count: 0 },
+    ];
+    expect(aggregateDailyTime(rows).map((r) => r.label)).toEqual(["23:00", "00:00"]);
+    expect(aggregateDailyTasks(rows).map((r) => r.failed)).toEqual([1, 0]);
+  });
+
+  it("splits hourly failure rows per hour", () => {
+    const result = aggregateDailyErrors([
+      { date: "2026-11-15", hour: 23, failure_reason: "", task_count: 2 },
+      { date: "2026-11-16", hour: 0, failure_reason: "", task_count: 1 },
+    ]);
+    expect(result.map((r) => r.label)).toEqual(["23:00", "00:00"]);
   });
 });

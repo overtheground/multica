@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -21,7 +23,9 @@ import (
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
-// All of them accept ?days=N (defaults to 30, capped at 365) and an optional
+// All of them accept ?days=N (defaults to 30, capped at 365) or, for a rolling
+// window, ?hours=N (1..48, wins over days; the three date-bucketed series then
+// also carry an `hour` 0..23 and split per hour), and an optional
 // ?project_id=<uuid> to scope the rollup to a single project. With no
 // project_id the data spans the whole workspace.
 //
@@ -43,6 +47,64 @@ import (
 // token spend / run time / failure volume are workspace-level operational
 // metrics. The three per-AGENT rollups additionally apply per-agent visibility:
 // see foldRestrictedAgents.
+
+// maxDashboardHours caps ?hours=N. The hourly rollup is only ever drawn as a
+// rolling day or two; a wider request belongs on ?days=N.
+const maxDashboardHours = 48
+
+// hoursParam reads ?hours=N. ok is false when the param is absent or outside
+// 1..maxDashboardHours, in which case the caller falls back to ?days=N.
+func hoursParam(r *http.Request) (hours int, ok bool) {
+	raw := r.URL.Query().Get("hours")
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > maxDashboardHours {
+		return 0, false
+	}
+	return n, true
+}
+
+// hourlyRequested reports whether the date-bucketed series should be split
+// per hour (?hours=N present and valid).
+func hourlyRequested(r *http.Request) bool {
+	_, ok := hoursParam(r)
+	return ok
+}
+
+// sinceFromHours is the cutoff of a rolling N-hour window: the start of the
+// current UTC hour minus N-1 hours, so the window is exactly N hourly buckets
+// (the current, partial one included). Hour-aligned on purpose — the usage
+// rollup is bucketed per UTC hour, and the run-time / failure series reuse the
+// same instant so all of them cover one span. UTC alignment is right for any
+// viewer tz: every offset moves the hour label, never the bucket edge.
+func sinceFromHours(now time.Time, hours int) time.Time {
+	return now.UTC().Truncate(time.Hour).Add(-time.Duration(hours-1) * time.Hour)
+}
+
+// dashboardSince is the cutoff every dashboard endpoint reads: the rolling
+// ?hours=N window when present, otherwise the calendar ?days=N cutoff (exact
+// N days when `exact`, N+1 with trim headroom otherwise — see
+// parseExactSinceParamInTZ).
+func dashboardSince(r *http.Request, defaultDays int, tz string, exact bool) pgtype.Timestamptz {
+	if hours, ok := hoursParam(r); ok {
+		return pgtype.Timestamptz{Time: sinceFromHours(dayWindowNow(), hours), Valid: true}
+	}
+	if exact {
+		return parseExactSinceParamInTZ(r, defaultDays, tz)
+	}
+	return parseSinceParamInTZ(r, defaultDays, tz)
+}
+
+// bucketHour maps the SQL hour column (-1 when the series is not hourly) to
+// the optional JSON field.
+func bucketHour(h int32) *int32 {
+	if h < 0 {
+		return nil
+	}
+	return &h
+}
 
 // restrictedAgentsRowID is the synthetic agent_id that every row this response
 // refuses to name is folded onto. Deliberately not a UUID, so it can never
@@ -152,6 +214,7 @@ func parseProjectIDParam(w http.ResponseWriter, r *http.Request) (pgtype.UUID, b
 // across providers (e.g. Cursor's `auto`).
 type DashboardUsageDailyResponse struct {
 	Date             string `json:"date"`
+	Hour             *int32 `json:"hour,omitempty"`
 	Provider         string `json:"provider"`
 	Model            string `json:"model"`
 	InputTokens      int64  `json:"input_tokens"`
@@ -184,9 +247,9 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, false)
 
-	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
+	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID, hourlyRequested(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
@@ -200,12 +263,14 @@ func (h *Handler) listDashboardUsageDaily(
 	tz string,
 	since pgtype.Timestamptz,
 	projectID pgtype.UUID,
+	hourly bool,
 ) ([]DashboardUsageDailyResponse, error) {
 	rows, err := h.Queries.ListDashboardUsageDaily(ctx, db.ListDashboardUsageDailyParams{
 		WorkspaceID: workspaceID,
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		Hourly:      hourly,
 	})
 	if err != nil {
 		return nil, err
@@ -214,6 +279,7 @@ func (h *Handler) listDashboardUsageDaily(
 	for i, row := range rows {
 		resp[i] = DashboardUsageDailyResponse{
 			Date:                     row.Date.Time.Format("2006-01-02"),
+			Hour:                     bucketHour(row.Hour),
 			Provider:                 row.Provider,
 			Model:                    row.Model,
 			InputTokens:              row.InputTokens,
@@ -281,7 +347,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	// the chart directly above it, so at 1D a single agent's row could read
 	// higher than the workspace total (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, true)
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
@@ -402,7 +468,7 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	// Tasks KPI tiles, so the N+1 cutoff put those two tiles on a wider
 	// window than the Cost / Tokens tiles beside them (MUL-5551).
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, true)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -459,6 +525,7 @@ func foldRestrictedAgentRunTime(
 // CancelledCount are disjoint subsets of TaskCount.
 type DashboardRunTimeDailyResponse struct {
 	Date           string `json:"date"`
+	Hour           *int32 `json:"hour,omitempty"`
 	TotalSeconds   int64  `json:"total_seconds"`
 	TaskCount      int32  `json:"task_count"`
 	FailedCount    int32  `json:"failed_count"`
@@ -482,13 +549,14 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
 	// their calendar day identically to the Cost / Tokens charts.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, false)
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		Hourly:      hourlyRequested(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily runtime")
@@ -499,6 +567,7 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	for i, row := range rows {
 		resp[i] = DashboardRunTimeDailyResponse{
 			Date:           row.Date.Time.Format("2006-01-02"),
+			Hour:           bucketHour(row.Hour),
 			TotalSeconds:   row.TotalSeconds,
 			TaskCount:      row.TaskCount,
 			FailedCount:    row.FailedCount,
@@ -528,6 +597,7 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 // terminal-task counts. FailureReason == "" is the succeeded bucket.
 type DashboardFailureDailyResponse struct {
 	Date          string `json:"date"`
+	Hour          *int32 `json:"hour,omitempty"`
 	FailureReason string `json:"failure_reason"`
 	TaskCount     int32  `json:"task_count"`
 }
@@ -547,13 +617,14 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	// Same viewer-tz day boundary as every other daily series so the Errors
 	// tab lines up with Cost / Tokens / Time / Tasks.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, false)
 
 	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Tz:          tz,
 		Since:       since,
 		ProjectID:   projectID,
+		Hourly:      hourlyRequested(r),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list daily failures")
@@ -564,6 +635,7 @@ func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Reque
 	for i, row := range rows {
 		resp[i] = DashboardFailureDailyResponse{
 			Date:          row.Date.Time.Format("2006-01-02"),
+			Hour:          bucketHour(row.Hour),
 			FailureReason: row.FailureReason,
 			TaskCount:     row.TaskCount,
 		}
@@ -603,7 +675,7 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	// covered one extra day, so at days=1 the card could report yesterday's
 	// failures next to a chart showing none.
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, true)
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -688,7 +760,7 @@ func (h *Handler) GetDashboardUsageByIssue(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tz := h.resolveViewingTZ(r)
-	since := parseExactSinceParamInTZ(r, 30, tz)
+	since := dashboardSince(r, 30, tz, true)
 
 	excluded := make([]pgtype.UUID, 0, len(restricted))
 	for id := range restricted {
