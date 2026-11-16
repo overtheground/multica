@@ -129,6 +129,7 @@ CROSS JOIN terminal_runs;
 -- instead of forming a separate case-variant bucket.
 SELECT
     DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    (CASE WHEN sqlc.arg('hourly')::bool THEN EXTRACT(HOUR FROM bucket_hour AT TIME ZONE sqlc.arg('tz')::text)::int ELSE -1 END)::int AS hour,
     LOWER(provider) AS provider,
     model,
     SUM(input_tokens)::bigint        AS input_tokens,
@@ -145,8 +146,8 @@ FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), LOWER(provider), model
-ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(provider), model;
+GROUP BY 1, 2, LOWER(provider), model
+ORDER BY 1 DESC, 2 DESC, LOWER(provider), model;
 
 -- name: ListDashboardUsageByAgent :many
 -- Per-(agent, provider, model) token aggregates from `task_usage_hourly`. No
@@ -207,6 +208,7 @@ ORDER BY agent_id, LOWER(provider), model;
 -- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
 SELECT
     DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    (CASE WHEN sqlc.arg('hourly')::bool THEN EXTRACT(HOUR FROM atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)::int ELSE -1 END)::int AS hour,
     COALESCE(
         SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
         0
@@ -223,8 +225,8 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
-GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
-ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2 DESC;
 
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
@@ -291,6 +293,7 @@ ORDER BY total_seconds DESC;
 -- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
 SELECT
     DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    (CASE WHEN sqlc.arg('hourly')::bool THEN EXTRACT(HOUR FROM atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)::int ELSE -1 END)::int AS hour,
     CASE
         WHEN atq.status = 'failed'
             THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
@@ -305,8 +308,8 @@ WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
-GROUP BY 1, 2
-ORDER BY 1 DESC, 2;
+GROUP BY 1, 2, 3
+ORDER BY 1 DESC, 2 DESC, 3;
 
 -- name: ListDashboardFailuresByAgent :many
 -- Per-(agent, failure_reason) terminal-task counts — the "top offenders"

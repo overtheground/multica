@@ -3185,3 +3185,33 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient dashboard window", () => {
+  const stubFetch = () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+  const queryOf = (fetchMock: ReturnType<typeof stubFetch>) =>
+    new URL(String(fetchMock.mock.calls[0]?.[0]), "https://api.example.test").searchParams;
+
+  it("asks for the rolling last 24 hours when the range is one day", async () => {
+    const fetchMock = stubFetch();
+    await new ApiClient("https://api.example.test").getDashboardUsageDaily({ days: 1, tz: "UTC" });
+    const q = queryOf(fetchMock);
+    expect(q.get("hours")).toBe("24");
+    expect(q.has("days")).toBe(false);
+  });
+
+  it("keeps calendar days for every other range", async () => {
+    for (const days of [2, 7, 30]) {
+      const fetchMock = stubFetch();
+      await new ApiClient("https://api.example.test").getDashboardAgentRunTime({ days });
+      const q = queryOf(fetchMock);
+      expect(q.get("days")).toBe(String(days));
+      expect(q.has("hours")).toBe(false);
+    }
+  });
+});

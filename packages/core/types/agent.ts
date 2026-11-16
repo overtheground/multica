@@ -1020,6 +1020,9 @@ export interface RuntimeUsageByHour {
 // stays client-side via the model pricing table.
 export interface DashboardUsageDaily {
   date: string;
+  // Local hour 0..23; only present on the rolling-24h window, where the
+  // server splits each date per hour.
+  hour?: number;
   provider: string;
   model: string;
   input_tokens: number;
@@ -1093,6 +1096,9 @@ export interface DashboardAgentRunTime {
 // line up with the per-agent run-time card.
 export interface DashboardRunTimeDaily {
   date: string;
+  // Local hour 0..23; only present on the rolling-24h window, where the
+  // server splits each date per hour.
+  hour?: number;
   total_seconds: number;
   task_count: number;
   failed_count: number;
@@ -1113,6 +1119,9 @@ export interface DashboardRunTimeDaily {
 // does.
 export interface DashboardFailureDaily {
   date: string;
+  // Local hour 0..23; only present on the rolling-24h window, where the
+  // server splits each date per hour.
+  hour?: number;
   failure_reason: string;
   task_count: number;
 }

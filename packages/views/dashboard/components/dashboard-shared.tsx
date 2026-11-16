@@ -6,24 +6,39 @@ import {
 } from "@multica/ui/components/ui/number-flow";
 import { formatDuration } from "../utils";
 
-// Period selector — mirrors the runtime detail page so users see the same
-// option set across both dashboards. `dims` declares which chart dimensions
-// each range may be drawn at: 1d / 7d at the weekly grain collapse to a single
-// bar, 180d at the daily grain is 180 unreadable bars.
+// Period selector — presets plus a free-form number of days. `dims` on a
+// preset documents which chart dimensions the range may be drawn at (see
+// `dimsForDays`): 7d at the weekly grain collapses to a single bar, 180d at the
+// daily grain is 180 unreadable bars.
 //
-// 1d semantic: "today" (the natural calendar day from 00:00 in the viewer's
-// timezone), not "the last 24 hours". The `dailyCutoffIso` filter on the page
-// enforces this even at the midnight edge.
+// 1d semantic: the rolling LAST 24 HOURS from now, drawn per hour — not the
+// calendar day. The client asks the server for `hours=24`
+// (setDashboardWindow in core/api/client.ts); the server cuts the window on
+// the current hour edge and returns hourly buckets, so there is no empty tail
+// after midnight.
 export const TIME_RANGES = [
-  { label: "1d", days: 1, dims: ["daily"] as const },
-  { label: "7d", days: 7, dims: ["daily"] as const },
-  { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
-  { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
-  { label: "180d", days: 180, dims: ["weekly"] as const },
+  { days: 1 },
+  { days: 7 },
+  { days: 30 },
+  { days: 90 },
+  { days: 180 },
 ] as const;
 
-export type TimeRange = (typeof TIME_RANGES)[number]["days"];
+/** Longest selectable range. Keeps the weekly over-fetch
+ *  (`ceil(days / 7) * 7`) inside the server's 365-day `days` cap. */
+export const MAX_RANGE_DAYS = 180;
+
+/** Number of days the dashboard is scoped to; 1 means the rolling 24 hours. */
+export type TimeRange = number;
 export type Dim = "daily" | "weekly";
+
+/** Clamps free-form input to a whole number of days in 1..MAX_RANGE_DAYS.
+ *  Returns null for anything that is not a number, so the caller can ignore it. */
+export function parseCustomDays(raw: string): TimeRange | null {
+  const n = Math.floor(Number(raw.trim()));
+  if (raw.trim() === "" || !Number.isFinite(n)) return null;
+  return Math.min(MAX_RANGE_DAYS, Math.max(1, n));
+}
 
 /**
  * Which chart dimensions the current range may be drawn at.
@@ -35,11 +50,14 @@ export type Dim = "daily" | "weekly";
  * the dependency runs one way only — a card offers whichever dimensions its
  * range allows, and nothing resets. A card-scoped control must never reach up
  * and change a page-scoped one (MUL-5759).
+ *
+ * Any number of days gets the same rule the presets follow: up to a week is
+ * daily only, up to 90 days either, beyond that weekly only.
  */
 export function dimsForDays(days: TimeRange): readonly Dim[] {
-  return (
-    TIME_RANGES.find((r) => r.days === days)?.dims ?? (["daily"] as const)
-  );
+  if (days <= 7) return ["daily"];
+  if (days <= 90) return ["daily", "weekly"];
+  return ["weekly"];
 }
 
 /** Sentinel for "no project filter" — kept distinct from the empty string so
@@ -132,4 +150,13 @@ export function DurationNumberFlow({
       </NumberFlowGroup>
     </>
   );
+}
+
+/** Label of a range as the header and the KPI tiles show it: "24H" for the
+ *  rolling day, "30D" otherwise (unit localised by the `range_*` keys). */
+export function rangeLabel(
+  days: TimeRange,
+  t: (key: "days" | "hours", n: number) => string,
+): string {
+  return days === 1 ? t("hours", 24) : t("days", days);
 }

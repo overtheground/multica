@@ -67,6 +67,7 @@ import {
   type TimeRange,
 } from "./dashboard-shared";
 import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
+import { useRangeLabel } from "./use-range-label";
 import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
 import { TokenBreakdownCard, type TokenBreakdownCardRow } from "./token-breakdown-card";
@@ -160,6 +161,7 @@ export function DashboardPage() {
   const navigation = useNavigation();
   const locales = i18n.resolvedLanguage ?? i18n.language;
   const [days, setDays] = useState<TimeRange>(30);
+  const rangeText = useRangeLabel()(days);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
 
   // The tab lives in the URL because the Errors view is the half of this page
@@ -209,7 +211,9 @@ export function DashboardPage() {
   // they show. The per-agent rollups stay at `days` so KPI/leaderboard labels
   // (e.g. "Tasks · 30D") keep their advertised window.
   const weekCount = Math.max(1, Math.ceil(days / 7));
-  const chartFetchDays = weekCount * 7;
+  // The rolling 24h range (days === 1) is requested as `hours=24`, which the
+  // server already closes on the hour edge, so it needs no over-fetch.
+  const chartFetchDays = days === 1 ? 1 : weekCount * 7;
 
   const dailyQuery = useQuery(
     dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
@@ -281,10 +285,13 @@ export function DashboardPage() {
   // though the per-date queries over-fetch for the weekly charts. The cutoff is
   // anchored on the viewer's timezone — the same axis the backend slices
   // `bucket_hour` on — so it lands on the same calendar boundary. Applied in
-  // both dims so 1d strictly means "today" even at the midnight edge where a
-  // wall-clock cutoff would otherwise include yesterday.
+  // both dims so 3d strictly means today + the two days before it even at the
+  // midnight edge where a wall-clock cutoff would otherwise include a fourth.
+  // The rolling 24h range (days === 1) is the exception: the server already
+  // returns exactly its hourly buckets, spanning yesterday and today, so a
+  // calendar-day cutoff would cut off the older half.
   const dailyCutoffIso = useMemo(
-    () => addDaysIso(todayIso(viewTZ), -(days - 1)),
+    () => (days === 1 ? "" : addDaysIso(todayIso(viewTZ), -(days - 1))),
     [days, viewTZ],
   );
   const dailyUsageInWindow = useMemo(
@@ -577,11 +584,11 @@ export function DashboardPage() {
                     section uses, expanded to four tiles. */}
                 <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                   <KpiCard
-                    label={t(($) => $.kpi.cost_label, { days })}
+                    label={t(($) => $.kpi.cost_label, { range: rangeText })}
                     value={<CurrencyNumberFlow value={totals.cost} locales={locales} />}
                   />
                   <KpiCard
-                    label={t(($) => $.kpi.tokens_label, { days })}
+                    label={t(($) => $.kpi.tokens_label, { range: rangeText })}
                     value={
                       <CompactNumberFlow
                         value={
@@ -599,7 +606,7 @@ export function DashboardPage() {
                     })}
                   />
                   <KpiCard
-                    label={t(($) => $.kpi.run_time_label, { days })}
+                    label={t(($) => $.kpi.run_time_label, { range: rangeText })}
                     value={
                       <DurationNumberFlow
                         seconds={runTimeTotals.totalSeconds}
@@ -612,7 +619,7 @@ export function DashboardPage() {
                     })}
                   />
                   <KpiCard
-                    label={t(($) => $.kpi.tasks_label, { days })}
+                    label={t(($) => $.kpi.tasks_label, { range: rangeText })}
                     value={
                       <NumberFlow
                         value={runTimeTotals.taskCount}
@@ -677,7 +684,7 @@ export function DashboardPage() {
               <DashboardSkeleton />
             ) : (
               <ErrorsTab
-                days={days}
+                range={rangeText}
                 allowedDims={allowedDims}
                 totals={failureTotals}
                 classRows={failureClassRows}
