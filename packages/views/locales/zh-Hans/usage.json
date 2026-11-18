@@ -125,5 +125,17 @@
     "total": "总计",
     "share": "占比",
     "no_data": "此时间段内没有用量。"
+  },
+  "context": {
+    "title": "智能体上下文大小",
+    "threshold": "高亮阈值 (k token)",
+    "no_data": "此时间段暂无上下文数据。",
+    "chart_label": "每日峰值上下文",
+    "agent": "智能体",
+    "peak": "峰值",
+    "average": "平均",
+    "calls": "模型调用",
+    "runs": "运行数",
+    "other_agents": "其他智能体"
   }
 }

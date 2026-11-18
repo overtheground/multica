@@ -654,6 +654,20 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// ReportTaskContext sends the run's context-window summary (MUL-197).
+func (c *Client) ReportTaskContext(ctx context.Context, taskID string, stats *agent.ContextStats) error {
+	if stats == nil || stats.Calls == 0 {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/context", taskID), map[string]any{
+		"peak_tokens":            stats.PeakTokens,
+		"sum_tokens":             stats.SumTokens,
+		"calls":                  stats.Calls,
+		"last_tokens":            stats.LastTokens,
+		"last_cache_read_tokens": stats.LastCacheReadTokens,
+	}, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
 }

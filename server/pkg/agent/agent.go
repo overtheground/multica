@@ -255,6 +255,31 @@ type TokenUsage struct {
 const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
+// ContextStats summarizes the context window the model actually received on
+// each call: input + cache read + cache creation tokens of one response.
+type ContextStats struct {
+	PeakTokens          int64 // largest context of any call in the run
+	SumTokens           int64 // sum over calls; average = SumTokens / Calls
+	LastTokens          int64 // context of the most recent call
+	LastCacheReadTokens int64 // cache-read part of the most recent call
+	Calls               int32
+}
+
+// Add records one model call.
+func (c *ContextStats) Add(input, cacheRead, cacheWrite int64) {
+	total := input + cacheRead + cacheWrite
+	if total <= 0 {
+		return
+	}
+	if total > c.PeakTokens {
+		c.PeakTokens = total
+	}
+	c.SumTokens += total
+	c.LastTokens = total
+	c.LastCacheReadTokens = cacheRead
+	c.Calls++
+}
+
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
 	Output     string // final user-facing output selected by the backend
@@ -262,6 +287,9 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// Context is the per-model-call context size seen during the run (MUL-197).
+	// Nil when the backend does not report per-call usage.
+	Context *ContextStats
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was permanently refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history

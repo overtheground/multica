@@ -1505,6 +1505,17 @@ type SysCronExecution struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TaskContextUsage struct {
+	TaskID              pgtype.UUID        `json:"task_id"`
+	PeakContextTokens   int64              `json:"peak_context_tokens"`
+	SumContextTokens    int64              `json:"sum_context_tokens"`
+	CallCount           int32              `json:"call_count"`
+	LastContextTokens   int64              `json:"last_context_tokens"`
+	LastCacheReadTokens int64              `json:"last_cache_read_tokens"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskMessage struct {
 	ID              pgtype.UUID        `json:"id"`
 	TaskID          pgtype.UUID        `json:"task_id"`

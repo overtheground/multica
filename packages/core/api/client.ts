@@ -83,6 +83,8 @@ import type {
   DashboardUsageByIssue,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  DashboardContextRow,
+  ChatSessionContext,
   DashboardFailureDaily,
   DashboardFailureByAgent,
   RuntimeUpdate,
@@ -287,6 +289,8 @@ import {
   agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
+  DashboardContextListSchema,
+  ChatSessionContextSchema,
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
@@ -2633,6 +2637,33 @@ export class ApiClient {
       DashboardRunTimeDailyListSchema,
       [],
       { endpoint: "GET /api/dashboard/runtime/daily" },
+    );
+  }
+
+  async getDashboardContext(
+    kind: "by-agent" | "daily",
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardContextRow[]> {
+    const search = new URLSearchParams();
+    setDashboardWindow(search, params.days);
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/context/${kind}?${search}`);
+    return parseWithFallback<DashboardContextRow[]>(
+      raw,
+      DashboardContextListSchema,
+      [],
+      { endpoint: `GET /api/dashboard/context/${kind}` },
+    );
+  }
+
+  async getChatSessionContext(id: string): Promise<ChatSessionContext> {
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${id}/context`);
+    return parseWithFallback<ChatSessionContext>(
+      raw,
+      ChatSessionContextSchema,
+      { context_tokens: 0, cache_read_tokens: 0, peak_tokens: 0, updated_at: null },
+      { endpoint: "GET /api/chat/sessions/:id/context" },
     );
   }
 

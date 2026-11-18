@@ -199,3 +199,22 @@ the eye button. Opening a dialog or changing editor tabs conceals them again.
 Hiding the configuration keeps the draft intact; parser errors never echo
 fragments of JSON. This protects incidental screenshots/accessibility reads,
 while the explicit admin configuration API retains its existing authorization.
+
+## Changes: context size of agents and chats (MUL-197)
+
+The daemon records, per run, the context the model received on each call
+(input + cache read + cache creation tokens): peak, sum, call count and the
+last value. It is stored in `task_context_usage` (migration 584) through
+`POST /api/daemon/tasks/{id}/context`. Claude Code only; other backends report
+nothing. The Usage page gets a "context size" card (peak / average per agent,
+peak per day, highlight above a threshold, 200k by default, stored in the
+browser), and an open chat shows "ctx 142k" next to its title, refreshed on
+every `chat:done`.
+
+| Step | Where |
+| --- | --- |
+| Per-call capture | `server/pkg/agent/claude.go` (`recordClaudeContext`), `agent.go` (`ContextStats`) |
+| Report | `server/internal/daemon/client.go`, `daemon.go` |
+| Store and read | `server/internal/handler/context_usage.go`, `server/pkg/db/queries/task_usage.sql`, `migrations/584_*` |
+| API | `GET /api/dashboard/context/{by-agent,daily}`, `GET /api/chat/sessions/{id}/context` |
+| UI | `packages/views/dashboard/components/context-card.tsx`, `packages/views/chat/components/chat-context-badge.tsx` |

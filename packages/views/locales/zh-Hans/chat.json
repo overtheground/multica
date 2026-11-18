@@ -247,5 +247,10 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "context": {
+    "label": "ctx {{size}}",
+    "title": "机器人上次回复的上下文:{{size}} 个 token(缓存占 {{cache}}%)。并非对话长度。",
+    "empty": "尚无上下文数据"
   }
 }

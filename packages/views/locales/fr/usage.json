@@ -127,5 +127,17 @@
     "total": "Total",
     "share": "Part",
     "no_data": "Aucune utilisation sur cette période."
+  },
+  "context": {
+    "title": "Taille du contexte des agents",
+    "threshold": "Surligner au-dessus de (k tokens)",
+    "no_data": "Pas encore de données de contexte sur cette période.",
+    "chart_label": "Contexte maximal par jour",
+    "agent": "Agent",
+    "peak": "Max",
+    "average": "Moyenne",
+    "calls": "Appels modèle",
+    "runs": "Exécutions",
+    "other_agents": "Autres agents"
   }
 }

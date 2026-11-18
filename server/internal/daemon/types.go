@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -329,6 +330,9 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	// Context is the run's per-call context-window summary (MUL-197),
+	// reported on its own endpoint next to Usage.
+	Context *agent.ContextStats `json:"-"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.
