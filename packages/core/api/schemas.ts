@@ -1901,6 +1901,25 @@ const DashboardRunTimeDailySchema = z.object({
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
 
+const DashboardContextRowSchema = z.object({
+  agent_id: z.string().optional(),
+  date: z.string().optional(),
+  hour: z.number().optional(),
+  peak_tokens: z.number().default(0),
+  sum_tokens: z.number().default(0),
+  calls: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const DashboardContextListSchema = z.array(DashboardContextRowSchema);
+
+export const ChatSessionContextSchema = z.object({
+  context_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  peak_tokens: z.number().default(0),
+  updated_at: z.string().nullable().default(null),
+}).loose();
+
 // Failure rollups. `failure_reason` is an open string on purpose — it carries
 // the backend's canonical taxonomy, which grows as new classifier rules land
 // (server/pkg/taskfailure). Pinning it to a z.enum would make an installed

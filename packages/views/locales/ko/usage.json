@@ -125,5 +125,17 @@
     "total": "합계",
     "share": "비중",
     "no_data": "이 기간의 사용량이 없습니다."
+  },
+  "context": {
+    "title": "에이전트 컨텍스트 크기",
+    "threshold": "강조 기준 (k 토큰)",
+    "no_data": "이 기간의 컨텍스트 데이터가 아직 없습니다.",
+    "chart_label": "일별 최대 컨텍스트",
+    "agent": "에이전트",
+    "peak": "최대",
+    "average": "평균",
+    "calls": "모델 호출",
+    "runs": "실행",
+    "other_agents": "기타 에이전트"
   }
 }

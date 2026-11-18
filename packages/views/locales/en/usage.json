@@ -127,5 +127,17 @@
     "total": "Total",
     "share": "Share",
     "no_data": "No usage in this window."
+  },
+  "context": {
+    "title": "Agent context size",
+    "threshold": "Highlight above (k tokens)",
+    "no_data": "No context data in this window yet.",
+    "chart_label": "Peak context per day",
+    "agent": "Agent",
+    "peak": "Peak",
+    "average": "Average",
+    "calls": "Model calls",
+    "runs": "Runs",
+    "other_agents": "Other agents"
   }
 }

@@ -1592,6 +1592,8 @@ export function useRealtimeSync(
       // work: they ignore the extra fields and rely on the invalidate
       // below, which keeps the old behavior alive.
       applyChatDoneToCache(qc, payload);
+      // The daemon stores the run's context size before it completes the task.
+      qc.invalidateQueries({ queryKey: chatKeys.context(payload.chat_session_id) });
       // NOTE: the pending aggregate is left to the task:completed / task:failed
       // handlers (which carry the task_id needed to remove the right entry).
       // chat:done no longer invalidates it, so a chatty session doesn't refetch

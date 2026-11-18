@@ -5794,6 +5794,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	if ctxErr := d.client.ReportTaskContext(ctx, task.ID, result.Context); ctxErr != nil {
+		taskLog.Warn("report task context failed", "error", ctxErr)
+	}
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -8872,6 +8875,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// returns (SessionID is already blanked above); reportTaskResult forwards it
 	// as session_rollout_missing on the terminal callback (MUL-5305).
 	defer func() { taskResult.SessionRolloutMissing = sessionRolloutMissing }()
+	defer func() { taskResult.Context = result.Context }()
 
 	switch result.Status {
 	case "completed":

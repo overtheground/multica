@@ -21,6 +21,10 @@ vi.mock("@multica/core/chat", () => ({
     selector({ setActiveSession: vi.fn() }),
 }));
 
+vi.mock("./chat-context-badge", () => ({
+  ChatContextBadge: () => null,
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));

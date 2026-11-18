@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getChatSessionContext = `-- name: GetChatSessionContext :one
+SELECT tcu.last_context_tokens, tcu.last_cache_read_tokens,
+       tcu.peak_context_tokens, tcu.updated_at
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+WHERE atq.chat_session_id = $1
+ORDER BY tcu.updated_at DESC
+LIMIT 1
+`
+
+type GetChatSessionContextRow struct {
+	LastContextTokens   int64              `json:"last_context_tokens"`
+	LastCacheReadTokens int64              `json:"last_cache_read_tokens"`
+	PeakContextTokens   int64              `json:"peak_context_tokens"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Context of the bot's latest answer in a chat: the newest run of the session
+// that reported one.
+func (q *Queries) GetChatSessionContext(ctx context.Context, chatSessionID pgtype.UUID) (GetChatSessionContextRow, error) {
+	row := q.db.QueryRow(ctx, getChatSessionContext, chatSessionID)
+	var i GetChatSessionContextRow
+	err := row.Scan(
+		&i.LastContextTokens,
+		&i.LastCacheReadTokens,
+		&i.PeakContextTokens,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
 WITH usage AS (
     SELECT
@@ -266,6 +297,137 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 			&i.MeteredTaskCount,
 			&i.FailedCount,
 			&i.CancelledCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardContextByAgent = `-- name: ListDashboardContextByAgent :many
+SELECT
+    atq.agent_id,
+    MAX(tcu.peak_context_tokens)::bigint AS peak_context_tokens,
+    COALESCE(SUM(tcu.sum_context_tokens), 0)::bigint AS sum_context_tokens,
+    COALESCE(SUM(tcu.call_count), 0)::bigint AS call_count,
+    COUNT(*)::int AS task_count
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, tcu.updated_at) >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.agent_id
+ORDER BY peak_context_tokens DESC
+`
+
+type ListDashboardContextByAgentParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardContextByAgentRow struct {
+	AgentID           pgtype.UUID `json:"agent_id"`
+	PeakContextTokens int64       `json:"peak_context_tokens"`
+	SumContextTokens  int64       `json:"sum_context_tokens"`
+	CallCount         int64       `json:"call_count"`
+	TaskCount         int32       `json:"task_count"`
+}
+
+// Per-agent peak / average context over the window. avg is the mean of per-call
+// contexts (sum / calls), not of per-run values. Anchored on completed_at like
+// ListDashboardAgentRunTime; @since is passed through untruncated.
+func (q *Queries) ListDashboardContextByAgent(ctx context.Context, arg ListDashboardContextByAgentParams) ([]ListDashboardContextByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardContextByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardContextByAgentRow{}
+	for rows.Next() {
+		var i ListDashboardContextByAgentRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.PeakContextTokens,
+			&i.SumContextTokens,
+			&i.CallCount,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardContextDaily = `-- name: ListDashboardContextDaily :many
+SELECT
+    DATE(COALESCE(atq.completed_at, tcu.updated_at) AT TIME ZONE $2::text) AS date,
+    (CASE WHEN $3::bool THEN EXTRACT(HOUR FROM COALESCE(atq.completed_at, tcu.updated_at) AT TIME ZONE $2::text)::int ELSE -1 END)::int AS hour,
+    MAX(tcu.peak_context_tokens)::bigint AS peak_context_tokens,
+    COALESCE(SUM(tcu.sum_context_tokens), 0)::bigint AS sum_context_tokens,
+    COALESCE(SUM(tcu.call_count), 0)::bigint AS call_count,
+    COUNT(*)::int AS task_count
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, tcu.updated_at) >= $4::timestamptz
+  AND ($5::uuid IS NULL OR i.project_id = $5)
+GROUP BY 1, 2
+ORDER BY 1, 2
+`
+
+type ListDashboardContextDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Hourly      bool               `json:"hourly"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardContextDailyRow struct {
+	Date              pgtype.Date `json:"date"`
+	Hour              int32       `json:"hour"`
+	PeakContextTokens int64       `json:"peak_context_tokens"`
+	SumContextTokens  int64       `json:"sum_context_tokens"`
+	CallCount         int64       `json:"call_count"`
+	TaskCount         int32       `json:"task_count"`
+}
+
+// Daily peak / average context, bucketed like ListDashboardRunTimeDaily.
+func (q *Queries) ListDashboardContextDaily(ctx context.Context, arg ListDashboardContextDailyParams) ([]ListDashboardContextDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardContextDaily,
+		arg.WorkspaceID,
+		arg.Tz,
+		arg.Hourly,
+		arg.Since,
+		arg.ProjectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardContextDailyRow{}
+	for rows.Next() {
+		var i ListDashboardContextDailyRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Hour,
+			&i.PeakContextTokens,
+			&i.SumContextTokens,
+			&i.CallCount,
+			&i.TaskCount,
 		); err != nil {
 			return nil, err
 		}
@@ -878,6 +1040,42 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertTaskContextUsage = `-- name: UpsertTaskContextUsage :exec
+INSERT INTO task_context_usage (
+    task_id, peak_context_tokens, sum_context_tokens, call_count,
+    last_context_tokens, last_cache_read_tokens
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (task_id) DO UPDATE SET
+    peak_context_tokens = EXCLUDED.peak_context_tokens,
+    sum_context_tokens = EXCLUDED.sum_context_tokens,
+    call_count = EXCLUDED.call_count,
+    last_context_tokens = EXCLUDED.last_context_tokens,
+    last_cache_read_tokens = EXCLUDED.last_cache_read_tokens,
+    updated_at = now()
+`
+
+type UpsertTaskContextUsageParams struct {
+	TaskID              pgtype.UUID `json:"task_id"`
+	PeakContextTokens   int64       `json:"peak_context_tokens"`
+	SumContextTokens    int64       `json:"sum_context_tokens"`
+	CallCount           int32       `json:"call_count"`
+	LastContextTokens   int64       `json:"last_context_tokens"`
+	LastCacheReadTokens int64       `json:"last_cache_read_tokens"`
+}
+
+// Context-window size per run (MUL-197). Re-reporting a task overwrites the row.
+func (q *Queries) UpsertTaskContextUsage(ctx context.Context, arg UpsertTaskContextUsageParams) error {
+	_, err := q.db.Exec(ctx, upsertTaskContextUsage,
+		arg.TaskID,
+		arg.PeakContextTokens,
+		arg.SumContextTokens,
+		arg.CallCount,
+		arg.LastContextTokens,
+		arg.LastCacheReadTokens,
+	)
+	return err
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec

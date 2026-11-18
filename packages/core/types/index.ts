@@ -84,6 +84,8 @@ export type {
   DashboardUsageByIssue,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  DashboardContextRow,
+  ChatSessionContext,
   DashboardFailureDaily,
   DashboardFailureByAgent,
   RuntimeUpdate,

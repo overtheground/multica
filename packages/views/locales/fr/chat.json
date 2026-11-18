@@ -251,5 +251,10 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "context": {
+    "label": "ctx {{size}}",
+    "title": "Contexte de la dernière réponse du bot : {{size}} tokens ({{cache}} % du cache). Ce n'est pas la longueur du chat.",
+    "empty": "Aucun contexte reporté"
   }
 }

@@ -251,5 +251,10 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "context": {
+    "label": "ctx {{size}}",
+    "title": "Context of the bot's last answer: {{size}} tokens ({{cache}}% from cache). Not the chat length.",
+    "empty": "No context reported yet"
   }
 }

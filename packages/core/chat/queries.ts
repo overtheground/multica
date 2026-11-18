@@ -35,6 +35,9 @@ export const chatKeys = {
   /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
+  /** Context size of the bot's latest answer (MUL-197). */
+  contextAll: () => ["chat", "context"] as const,
+  context: (sessionId: string) => [...chatKeys.contextAll(), sessionId] as const,
   messagesAll: () => ["chat", "messages"] as const,
   messages: (sessionId: string) => [...chatKeys.messagesAll(), sessionId] as const,
   messagesPageAll: () => ["chat", "messages-page"] as const,
@@ -72,6 +75,15 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 export function isTaskMessageTaskId(taskId: string | null | undefined): taskId is string {
   return typeof taskId === "string" && UUID_PATTERN.test(taskId);
+}
+
+export function chatSessionContextOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.context(sessionId),
+    queryFn: () => api.getChatSessionContext(sessionId),
+    // Refreshed by the chat:done handler after every bot answer.
+    staleTime: Infinity,
+  });
 }
 
 export function chatSessionsOptions(wsId: string) {

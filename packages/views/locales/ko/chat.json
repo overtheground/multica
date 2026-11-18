@@ -247,5 +247,10 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "context": {
+    "label": "ctx {{size}}",
+    "title": "봇의 마지막 응답 컨텍스트: {{size}} 토큰 (캐시 {{cache}}%). 대화 길이가 아닙니다.",
+    "empty": "보고된 컨텍스트 없음"
   }
 }

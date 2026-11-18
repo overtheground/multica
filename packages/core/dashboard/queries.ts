@@ -33,6 +33,18 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "runtime-daily", days, projectId, tz] as const,
+  contextByAgent: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "context-by-agent", days, projectId, tz] as const,
+  contextDaily: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "context-daily", days, projectId, tz] as const,
   failuresDaily: (
     wsId: string,
     days: number,
@@ -235,6 +247,35 @@ export function dashboardFailuresByAgentOptions(
     queryKey,
     queryFn: () =>
       api.getDashboardFailuresByAgent({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+    refetchInterval: REFETCH_INTERVAL,
+    placeholderData: (previousData, previousQuery) =>
+      isSameDashboardScope(previousQuery?.queryKey, queryKey)
+        ? keepPreviousData(previousData)
+        : undefined,
+  });
+}
+
+export function dashboardContextOptions(
+  kind: "by-agent" | "daily",
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  const queryKey =
+    kind === "daily"
+      ? dashboardKeys.contextDaily(wsId, days, projectId, tz)
+      : dashboardKeys.contextByAgent(wsId, days, projectId, tz);
+  return queryOptions({
+    queryKey,
+    queryFn: () =>
+      api.getDashboardContext(kind, {
         days,
         project_id: projectId ?? undefined,
         tz,

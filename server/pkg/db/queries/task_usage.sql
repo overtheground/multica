@@ -370,3 +370,67 @@ WHERE a.workspace_id = $1
 GROUP BY i.id, i.number, i.title, w.issue_prefix
 ORDER BY SUM(tu.input_tokens + tu.output_tokens + tu.cache_read_tokens + tu.cache_write_tokens) DESC, i.id
 LIMIT @row_limit::int;
+
+-- name: UpsertTaskContextUsage :exec
+-- Context-window size per run (MUL-197). Re-reporting a task overwrites the row.
+INSERT INTO task_context_usage (
+    task_id, peak_context_tokens, sum_context_tokens, call_count,
+    last_context_tokens, last_cache_read_tokens
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (task_id) DO UPDATE SET
+    peak_context_tokens = EXCLUDED.peak_context_tokens,
+    sum_context_tokens = EXCLUDED.sum_context_tokens,
+    call_count = EXCLUDED.call_count,
+    last_context_tokens = EXCLUDED.last_context_tokens,
+    last_cache_read_tokens = EXCLUDED.last_cache_read_tokens,
+    updated_at = now();
+
+-- name: GetChatSessionContext :one
+-- Context of the bot's latest answer in a chat: the newest run of the session
+-- that reported one.
+SELECT tcu.last_context_tokens, tcu.last_cache_read_tokens,
+       tcu.peak_context_tokens, tcu.updated_at
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+WHERE atq.chat_session_id = $1
+ORDER BY tcu.updated_at DESC
+LIMIT 1;
+
+-- name: ListDashboardContextByAgent :many
+-- Per-agent peak / average context over the window. avg is the mean of per-call
+-- contexts (sum / calls), not of per-run values. Anchored on completed_at like
+-- ListDashboardAgentRunTime; @since is passed through untruncated.
+SELECT
+    atq.agent_id,
+    MAX(tcu.peak_context_tokens)::bigint AS peak_context_tokens,
+    COALESCE(SUM(tcu.sum_context_tokens), 0)::bigint AS sum_context_tokens,
+    COALESCE(SUM(tcu.call_count), 0)::bigint AS call_count,
+    COUNT(*)::int AS task_count
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, tcu.updated_at) >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.agent_id
+ORDER BY peak_context_tokens DESC;
+
+-- name: ListDashboardContextDaily :many
+-- Daily peak / average context, bucketed like ListDashboardRunTimeDaily.
+SELECT
+    DATE(COALESCE(atq.completed_at, tcu.updated_at) AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    (CASE WHEN sqlc.arg('hourly')::bool THEN EXTRACT(HOUR FROM COALESCE(atq.completed_at, tcu.updated_at) AT TIME ZONE sqlc.arg('tz')::text)::int ELSE -1 END)::int AS hour,
+    MAX(tcu.peak_context_tokens)::bigint AS peak_context_tokens,
+    COALESCE(SUM(tcu.sum_context_tokens), 0)::bigint AS sum_context_tokens,
+    COALESCE(SUM(tcu.call_count), 0)::bigint AS call_count,
+    COUNT(*)::int AS task_count
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND COALESCE(atq.completed_at, tcu.updated_at) >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY 1, 2
+ORDER BY 1, 2;

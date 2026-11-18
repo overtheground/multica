@@ -203,6 +203,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
+		seenContext := make(map[string]struct{})
+		contextStats := &ContextStats{}
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -262,6 +264,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				assistantEventCount++
 				turn := b.handleAssistant(msg, msgCh, usage, seenUsage)
+				recordClaudeContext(msg, contextStats, seenContext)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
@@ -447,6 +450,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
 			Usage:          usage,
+			Context:        contextStatsOrNil(contextStats),
 			ResumeRejected: resumeRejected,
 		}
 	}()
@@ -457,6 +461,33 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		session.SupplementReady = supplements.ready
 	}
 	return session, nil
+}
+
+// recordClaudeContext adds the main-loop assistant message's context size
+// (input + cache read + cache creation) to stats, once per message id.
+// Subagent messages are skipped: they run in their own context.
+func recordClaudeContext(msg claudeSDKMessage, stats *ContextStats, seen map[string]struct{}) {
+	if msg.ParentToolUseID != "" {
+		return
+	}
+	var content claudeMessageContent
+	if err := json.Unmarshal(msg.Message, &content); err != nil || content.Usage == nil {
+		return
+	}
+	if content.ID != "" {
+		if _, ok := seen[content.ID]; ok {
+			return
+		}
+		seen[content.ID] = struct{}{}
+	}
+	stats.Add(content.Usage.InputTokens, content.Usage.CacheReadInputTokens, content.Usage.CacheCreationInputTokens)
+}
+
+func contextStatsOrNil(c *ContextStats) *ContextStats {
+	if c == nil || c.Calls == 0 {
+		return nil
+	}
+	return c
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage, seenUsage map[string]struct{}) assistantTurn {

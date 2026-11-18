@@ -1106,6 +1106,29 @@ export interface DashboardRunTimeDaily {
   cancelled_count: number;
 }
 
+// Context-window size per agent or per day (MUL-197): the tokens the model
+// received per call (input + cache read + cache creation). The average is
+// sum_tokens / calls. `agent_id` is set on the by-agent series, `date`/`hour`
+// on the daily one.
+export interface DashboardContextRow {
+  agent_id?: string;
+  date?: string;
+  hour?: number;
+  peak_tokens: number;
+  sum_tokens: number;
+  calls: number;
+  task_count: number;
+}
+
+// Context of the bot's latest answer in a chat. All zeros until the first
+// answer reported one.
+export interface ChatSessionContext {
+  context_tokens: number;
+  cache_read_tokens: number;
+  peak_tokens: number;
+  updated_at: string | null;
+}
+
 // One (date, failure_reason) bucket of terminal-task counts for the workspace
 // dashboard's Errors metric.
 //

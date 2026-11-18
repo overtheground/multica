@@ -72,6 +72,7 @@ import { UsageTrendCard } from "./usage-trend-card";
 import { Leaderboard } from "./leaderboard";
 import { TokenBreakdownCard, type TokenBreakdownCardRow } from "./token-breakdown-card";
 import { ErrorsTab } from "./errors-tab";
+import { ContextCard } from "./context-card";
 import { cn } from "@multica/ui/lib/utils";
 
 // Stable references — `data ?? []` would create a new empty array on
@@ -667,6 +668,14 @@ export function DashboardPage() {
                   rows={issueRows}
                   shareTotal={windowTokenTotal}
                   emptyLabel={t(($) => $.breakdown.no_data)}
+                />
+
+                <ContextCard
+                  wsId={wsId}
+                  days={days}
+                  projectId={projectId}
+                  tz={viewTZ}
+                  agents={agents}
                 />
 
                 <Leaderboard

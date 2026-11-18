@@ -32,6 +32,7 @@ import { isImeComposing } from "@multica/core/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
+import { ChatContextBadge } from "./chat-context-badge";
 
 /**
  * Per-session header for the conversation pane: agent avatar + editable chat
@@ -206,6 +207,8 @@ export function ChatSessionHeader({
           </div>
         )}
       </div>
+
+      <ChatContextBadge sessionId={session.id} />
 
       <DropdownMenu>
         <DropdownMenuTrigger
