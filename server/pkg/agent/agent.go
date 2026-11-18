@@ -254,7 +254,6 @@ type TokenUsage struct {
 // int64 all the way to the database instead of drifting through float64.
 const CostUSDTicksPerUSD = 10_000_000_000
 
-// Result is the final outcome after an agent session completes.
 // ContextStats summarizes the context window the model actually received on
 // each call: input + cache read + cache creation tokens of one response.
 type ContextStats struct {
@@ -280,6 +279,7 @@ func (c *ContextStats) Add(input, cacheRead, cacheWrite int64) {
 	c.Calls++
 }
 
+// Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
 	Output     string // final user-facing output selected by the backend
