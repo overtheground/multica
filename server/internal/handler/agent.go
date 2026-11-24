@@ -111,7 +111,13 @@ type AgentResponse struct {
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             string                     `json:"status"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
+	// FreshSessionPerRun: every issue run starts a new session instead of
+	// resuming the previous one (MUL-207).
+	FreshSessionPerRun bool `json:"fresh_session_per_run"`
+	// ContextCapTokens: a resumed issue session above this context size is
+	// dropped (MUL-207). Nil = no cap.
+	ContextCapTokens *int64 `json:"context_cap_tokens"`
+	Model            string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -229,6 +235,8 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		InvocationTargets:        []AgentInvocationTargetDTO{},
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
+		FreshSessionPerRun:       a.FreshSessionPerRun,
+		ContextCapTokens:         int8Ptr(a.ContextCapTokens),
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
@@ -367,6 +375,9 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	// ContextTokens is the approximate context size of the run's last model
+	// call (MUL-197), set on run listings once the run reported it (MUL-207).
+	ContextTokens            *int64                 `json:"context_tokens,omitempty"`
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
@@ -1697,7 +1708,10 @@ type UpdateAgentRequest struct {
 	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             *string                     `json:"status"`
 	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
-	Model              *string                     `json:"model"`
+	// FreshSessionPerRun and ContextCapTokens: MUL-207. A cap of 0 clears it.
+	FreshSessionPerRun *bool   `json:"fresh_session_per_run"`
+	ContextCapTokens   *int64  `json:"context_cap_tokens"`
+	Model              *string `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
 	//   - field present with "" → explicit clear (use runtime default)
@@ -2062,6 +2076,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
+	}
+	if req.FreshSessionPerRun != nil {
+		params.FreshSessionPerRun = pgtype.Bool{Bool: *req.FreshSessionPerRun, Valid: true}
+	}
+	if req.ContextCapTokens != nil {
+		if *req.ContextCapTokens < 0 {
+			writeError(w, http.StatusBadRequest, "context_cap_tokens must be >= 0 (0 clears the cap)")
+			return
+		}
+		params.ContextCapTokens = pgtype.Int8{Int64: *req.ContextCapTokens, Valid: true}
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
@@ -2767,6 +2791,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
+	h.hydrateTaskContextTokens(r.Context(), resp)
 	if includeUsage {
 		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
 			slog.Warn("list agent task usage failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -3063,4 +3088,11 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func int8Ptr(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
 }

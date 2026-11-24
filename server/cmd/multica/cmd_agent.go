@@ -209,6 +209,8 @@ func init() {
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
+	agentUpdateCmd.Flags().Bool("fresh-session-per-run", false, "Start a new session on every issue run instead of resuming the previous one (--fresh-session-per-run=false to turn off)")
+	agentUpdateCmd.Flags().Int64("context-cap-tokens", 0, "Drop a resumed issue session whose context exceeds this many tokens (0 clears the cap)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -796,6 +798,17 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("status")
 		body["status"] = v
 	}
+	if cmd.Flags().Changed("fresh-session-per-run") {
+		v, _ := cmd.Flags().GetBool("fresh-session-per-run")
+		body["fresh_session_per_run"] = v
+	}
+	if cmd.Flags().Changed("context-cap-tokens") {
+		v, _ := cmd.Flags().GetInt64("context-cap-tokens")
+		if v < 0 {
+			return fmt.Errorf("--context-cap-tokens must be >= 0")
+		}
+		body["context_cap_tokens"] = v
+	}
 	if cmd.Flags().Changed("max-concurrent-tasks") {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		if err := validateAgentMaxConcurrentTasksFlag(v); err != nil {
@@ -810,7 +823,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --fresh-session-per-run, or --context-cap-tokens (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

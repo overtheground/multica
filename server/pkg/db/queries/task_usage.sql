@@ -434,3 +434,19 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY 1, 2
 ORDER BY 1, 2;
+
+-- name: GetLastIssueContextTokens :one
+-- Context size reported by the newest run of (agent, issue) that reported one
+-- (MUL-207). The resume path compares it with the agent's context cap.
+SELECT tcu.last_context_tokens
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+WHERE atq.agent_id = $1 AND atq.issue_id = $2
+ORDER BY tcu.updated_at DESC
+LIMIT 1;
+
+-- name: ListTaskContextTokens :many
+-- Last reported context size per task, for run listings (MUL-207).
+SELECT task_id, last_context_tokens
+FROM task_context_usage
+WHERE task_id = ANY(@task_ids::uuid[]);

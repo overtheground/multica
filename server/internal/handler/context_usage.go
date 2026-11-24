@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5/pgtype"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -191,4 +193,59 @@ func (h *Handler) GetDashboardContextDaily(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskContextTokens fills ContextTokens on run listings (MUL-207). The
+// size is optional metadata, so a failed read leaves the field unset.
+func (h *Handler) hydrateTaskContextTokens(ctx context.Context, resp []AgentTaskResponse) {
+	if len(resp) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, len(resp))
+	for i := range resp {
+		ids[i] = parseUUID(resp[i].ID)
+	}
+	rows, err := h.Queries.ListTaskContextTokens(ctx, ids)
+	if err != nil {
+		return
+	}
+	byTask := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		byTask[uuidToString(row.TaskID)] = row.LastContextTokens
+	}
+	for i := range resp {
+		if v, ok := byTask[resp[i].ID]; ok {
+			resp[i].ContextTokens = &v
+		}
+	}
+}
+
+// issueSessionDropped reports whether this issue run must start a fresh
+// session although a resumable one exists (MUL-207): the agent runs fresh on
+// every run, or the newest reported context of (agent, issue) is above the
+// agent's cap. No cap and no flag, the default, never drops anything.
+func (h *Handler) issueSessionDropped(ctx context.Context, task *db.AgentTaskQueue) bool {
+	agent, err := h.Queries.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		return false
+	}
+	return sessionDropped(agent.FreshSessionPerRun, agent.ContextCapTokens, func() (int64, bool) {
+		n, err := h.Queries.GetLastIssueContextTokens(ctx, db.GetLastIssueContextTokensParams{
+			AgentID: task.AgentID,
+			IssueID: task.IssueID,
+		})
+		return n, err == nil
+	})
+}
+
+// sessionDropped is the pure decision behind issueSessionDropped.
+func sessionDropped(fresh bool, capTokens pgtype.Int8, lastContext func() (int64, bool)) bool {
+	if fresh {
+		return true
+	}
+	if !capTokens.Valid {
+		return false
+	}
+	n, ok := lastContext()
+	return ok && n > capTokens.Int64
 }
