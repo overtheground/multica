@@ -144,6 +144,12 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    fresh_session_per_run = COALESCE(sqlc.narg('fresh_session_per_run'), fresh_session_per_run),
+    context_cap_tokens = CASE
+        WHEN sqlc.narg('context_cap_tokens')::bigint IS NULL THEN context_cap_tokens
+        WHEN sqlc.narg('context_cap_tokens')::bigint = 0 THEN NULL
+        ELSE sqlc.narg('context_cap_tokens')::bigint
+    END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

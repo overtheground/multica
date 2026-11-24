@@ -54,6 +54,8 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	FreshSessionPerRun    bool        `json:"fresh_session_per_run"`
+	ContextCapTokens      pgtype.Int8 `json:"context_cap_tokens"`
 }
 
 type AgentBuilderDraft struct {

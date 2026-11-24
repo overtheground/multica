@@ -120,6 +120,29 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 	return i, err
 }
 
+const getLastIssueContextTokens = `-- name: GetLastIssueContextTokens :one
+SELECT tcu.last_context_tokens
+FROM task_context_usage tcu
+JOIN agent_task_queue atq ON atq.id = tcu.task_id
+WHERE atq.agent_id = $1 AND atq.issue_id = $2
+ORDER BY tcu.updated_at DESC
+LIMIT 1
+`
+
+type GetLastIssueContextTokensParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+}
+
+// Context size reported by the newest run of (agent, issue) that reported one
+// (MUL-207). The resume path compares it with the agent's context cap.
+func (q *Queries) GetLastIssueContextTokens(ctx context.Context, arg GetLastIssueContextTokensParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getLastIssueContextTokens, arg.AgentID, arg.IssueID)
+	var last_context_tokens int64
+	err := row.Scan(&last_context_tokens)
+	return last_context_tokens, err
+}
+
 const getTaskUsage = `-- name: GetTaskUsage :many
 SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks FROM task_usage
 WHERE task_id = $1
@@ -1032,6 +1055,38 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 			&i.CacheWriteTokens,
 			&i.CostUsdTicks,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskContextTokens = `-- name: ListTaskContextTokens :many
+SELECT task_id, last_context_tokens
+FROM task_context_usage
+WHERE task_id = ANY($1::uuid[])
+`
+
+type ListTaskContextTokensRow struct {
+	TaskID            pgtype.UUID `json:"task_id"`
+	LastContextTokens int64       `json:"last_context_tokens"`
+}
+
+// Last reported context size per task, for run listings (MUL-207).
+func (q *Queries) ListTaskContextTokens(ctx context.Context, taskIds []pgtype.UUID) ([]ListTaskContextTokensRow, error) {
+	rows, err := q.db.Query(ctx, listTaskContextTokens, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskContextTokensRow{}
+	for rows.Next() {
+		var i ListTaskContextTokensRow
+		if err := rows.Scan(&i.TaskID, &i.LastContextTokens); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

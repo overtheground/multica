@@ -3023,6 +3023,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.PriorSessionResumeUnavailable = true
 			}
 		} else if !task.ForceFreshSession {
+			// MUL-207: an agent that runs fresh every time, or whose last
+			// reported context passed its cap, still reuses the workdir but
+			// not the provider session.
+			dropSession := h.issueSessionDropped(r.Context(), task)
 			// Non-rerun follow-up on the same issue: resume the most recent
 			// (agent, issue) session so the agent keeps the issue's conversation
 			// context across turns. The "Focus on THIS comment" guard in
@@ -3032,7 +3036,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+				if prior.RuntimeID == task.RuntimeID && !dropSession {
 					resp.PriorSessionID = prior.SessionID.String
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
@@ -5726,6 +5730,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
+	h.hydrateTaskContextTokens(r.Context(), resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
 	// one batch) — otherwise the badge falls back to "someone" on issue detail.

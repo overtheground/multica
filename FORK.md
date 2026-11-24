@@ -218,3 +218,20 @@ every `chat:done`.
 | Store and read | `server/internal/handler/context_usage.go`, `server/pkg/db/queries/task_usage.sql`, `migrations/584_*` |
 | API | `GET /api/dashboard/context/{by-agent,daily}`, `GET /api/chat/sessions/{id}/context` |
 | UI | `packages/views/dashboard/components/context-card.tsx`, `packages/views/chat/components/chat-context-badge.tsx` |
+
+## Changes: session policy per agent and run context size (MUL-207)
+
+An issue run resumes the newest session of the same (agent, issue). Two agent
+settings change that: `fresh_session_per_run` always starts a new session (the
+workdir is still reused), and `context_cap_tokens` drops the session once the
+newest reported context of that agent and issue is above the cap. Both are off
+by default. `multica agent update <id> --fresh-session-per-run[=false]
+--context-cap-tokens N` (0 clears). Run listings (`multica agent tasks`,
+`multica issue runs`, JSON) carry `context_tokens`.
+
+| Step | Where |
+| --- | --- |
+| Columns | `server/migrations/585_agent_fresh_session.*` |
+| Resume decision | `server/internal/handler/daemon.go` (claim), `context_usage.go` (`sessionDropped`) |
+| Settings API and CLI | `server/internal/handler/agent.go`, `server/cmd/multica/cmd_agent.go` |
+| `context_tokens` in runs | `server/internal/handler/context_usage.go`, `server/pkg/db/queries/task_usage.sql` |
